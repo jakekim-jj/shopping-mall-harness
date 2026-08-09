@@ -1,0 +1,736 @@
+/* 하루상점 — 상품 목록 화면
+   팔레트/타이포는 이 파일 상단 토큰에서만 정의한다. */
+
+:root {
+  /* color */
+  --paper: #eaebe6;
+  --card: #fdfdfc;
+  --ink: #1b2320;
+  --muted: #6c7570;
+  --accent: #2f6b57;
+  --rule: #c5c9c1;
+  --tint-a: #e3e7df;
+  --tint-b: #eae4d9;
+  --tint-c: #dfe5e7;
+  --warn: #8a3b2f;
+
+  /* type */
+  --font-body: "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic",
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sign: "Avenir Next Condensed", "Helvetica Neue Condensed", "Arial Narrow",
+    "Oswald", Impact, sans-serif;
+  --font-num: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* layout */
+  --gutter: clamp(16px, 4vw, 40px);
+  --maxw: 1180px;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+[hidden] { display: none !important; }
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  border-bottom: 1px solid var(--ink);
+  background: var(--paper);
+}
+
+.masthead__inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 22px var(--gutter) 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 24px;
+}
+
+.mark {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mark__latin {
+  font-family: var(--font-sign);
+  font-size: clamp(30px, 6.2vw, 46px);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.mark__ko {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.masthead__count {
+  margin: 0;
+  font-family: var(--font-num);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+/* ---------- shelf ---------- */
+
+.shelf {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 52px) var(--gutter) 64px;
+}
+
+.shelf__title {
+  margin: 0 0 clamp(20px, 3vw, 32px);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+}
+
+/* ---------- product grid ---------- */
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: clamp(26px, 3.4vw, 40px) clamp(16px, 2.2vw, 26px);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.card__panel {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border: 1px solid var(--rule);
+  background: var(--tint-a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.card__panel[data-tint="1"] { background: var(--tint-b); }
+.card__panel[data-tint="2"] { background: var(--tint-c); }
+
+.card__img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  display: block;
+}
+
+.card__fallback {
+  display: none;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+/* 이미지 로드 실패: img는 DOM에 남기고 감추기만 한다 (패널 높이는 그대로 유지) */
+.card__panel.is-broken .card__img { visibility: hidden; position: absolute; }
+.card__panel.is-broken .card__fallback { display: block; }
+
+.card__name {
+  margin: 14px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card__desc {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 시그니처: 카탈로그 가격표처럼 점선 리더가 카드 왼쪽 끝에서 가격까지 이어진다 */
+.card__price-row {
+  margin: 12px 0 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.card__leader {
+  flex: 1 1 auto;
+  min-width: 12px;
+  height: 0;
+  margin-bottom: 0.42em;
+  border-bottom: 1px dotted var(--rule);
+}
+
+.card__price {
+  font-family: var(--font-num);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* ---------- loading skeletons ---------- */
+
+.skeletons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: clamp(26px, 3.4vw, 40px) clamp(16px, 2.2vw, 26px);
+}
+
+.skeleton { display: flex; flex-direction: column; }
+
+.skeleton__panel {
+  aspect-ratio: 4 / 5;
+  border: 1px solid var(--rule);
+}
+
+.skeleton__line { height: 11px; margin-top: 12px; }
+
+.skeleton__line--name { width: 72%; }
+.skeleton__line--desc { width: 92%; height: 9px; margin-top: 8px; }
+.skeleton__line--price { width: 42%; margin-top: 12px; align-self: flex-end; }
+
+.skeleton__panel,
+.skeleton__line {
+  background: linear-gradient(100deg, #dfe1db 30%, #eceee9 50%, #dfe1db 70%);
+  background-size: 300% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -150% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton__panel,
+  .skeleton__line { animation: none; }
+}
+
+/* ---------- empty / error ---------- */
+
+.notice {
+  border: 1px solid var(--rule);
+  background: var(--card);
+  padding: clamp(36px, 7vw, 64px) var(--gutter);
+  text-align: center;
+}
+
+.notice__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.notice__body {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.notice--error {
+  border-color: var(--warn);
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.notice--error .notice__title { color: var(--warn); }
+
+/* ---------- footer ---------- */
+
+.footer {
+  border-top: 1px solid var(--rule);
+  padding: 20px var(--gutter);
+}
+
+.footer p {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* =======================================================================
+   2차 사이클 추가 (2026-08-08) — 공통 헤더 장바구니 링크 / 상세 / 장바구니
+   1차 규칙은 위쪽 그대로 두고, 아래에만 덧붙인다.
+   ======================================================================= */
+
+/* ---------- 공통 헤더 — 장바구니 링크 + 수량 배지 ---------- */
+
+.masthead__aside {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.mark__home {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cart-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 1px solid var(--ink);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cart-link:hover { background: var(--tint-a); }
+
+.cart-link__count {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 목록 카드 링크 (PRD 5.1) ---------- */
+
+.card__link {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.card__link:hover .card__panel { border-color: var(--ink); }
+.card__link:hover .card__name { text-decoration: underline; text-underline-offset: 3px; }
+.card__link:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+/* ---------- 공통 — 뒤로 가기 링크 / 버튼 / 피드백 ---------- */
+
+.backlink {
+  margin: 0 0 clamp(20px, 3vw, 30px);
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+}
+
+.backlink a,
+.notice__action a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+.notice__action { margin: 18px 0 0; }
+
+.btn {
+  display: inline-block;
+  padding: 11px 20px;
+  border: 1px solid var(--ink);
+  background: var(--card);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13.5px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.btn:hover { background: var(--tint-a); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  padding: 13px 26px;
+  font-size: 14.5px;
+}
+
+.btn--primary:hover { background: #275a49; }
+
+.feedback {
+  margin: 14px 0 0;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.feedback--ok { color: var(--accent); font-weight: 600; }
+.feedback--bad { color: var(--warn); font-weight: 600; }
+
+/* ---------- 수량 조작 ---------- */
+
+.qty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 26px 0 22px;
+}
+
+.qty__label {
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.qty__btn {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid var(--rule);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.qty__btn:hover:not(:disabled) { border-color: var(--ink); }
+.qty__btn:disabled { opacity: 0.35; cursor: default; }
+
+.qty__input {
+  width: 62px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+  color: var(--ink);
+  font-family: var(--font-num);
+  font-size: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.qty__value {
+  min-width: 34px;
+  font-family: var(--font-num);
+  font-size: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 상품 상세 ---------- */
+
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: clamp(24px, 4vw, 48px);
+  align-items: start;
+}
+
+.detail__panel {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border: 1px solid var(--rule);
+  background: var(--tint-a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.detail__img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  display: block;
+}
+
+.detail__fallback {
+  display: none;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.detail__panel.is-broken .detail__img { visibility: hidden; position: absolute; }
+.detail__panel.is-broken .detail__fallback { display: block; }
+
+.detail__name {
+  margin: 0;
+  font-size: clamp(21px, 3.4vw, 28px);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+
+.detail__price {
+  margin: 14px 0 0;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-num);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail__desc {
+  margin: 18px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.detail-skeleton {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: clamp(24px, 4vw, 48px);
+  align-items: start;
+}
+
+.detail-skeleton__panel {
+  display: block;
+  aspect-ratio: 4 / 5;
+  border: 1px solid var(--rule);
+  background: linear-gradient(100deg, #dfe1db 30%, #eceee9 50%, #dfe1db 70%);
+  background-size: 300% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.detail-skeleton__body { display: block; }
+.detail-skeleton__body .skeleton__line { display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-skeleton__panel { animation: none; }
+}
+
+@media (max-width: 620px) {
+  .detail,
+  .detail-skeleton { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- 장바구니 ---------- */
+
+.cart-skeleton {
+  border: 1px solid var(--rule);
+  background: var(--card);
+  padding: 28px var(--gutter);
+}
+
+.cart-skeleton .skeleton__line { display: block; width: 100%; }
+
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.line {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.line__panel {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border: 1px solid var(--rule);
+  background: var(--tint-a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.line__img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  display: block;
+}
+
+.line__fallback {
+  display: none;
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.line__panel.is-broken .line__img { visibility: hidden; position: absolute; }
+.line__panel.is-broken .line__fallback { display: block; }
+
+.line__body { min-width: 0; }
+
+.line__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.line__price {
+  margin: 5px 0 0;
+  font-family: var(--font-num);
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 할인 줄 (3차). 할인 여부의 판정 근거는 이 스타일이 아니라
+   cart-item-discounted-price 요소의 존재 여부다 (PRD 14.5). */
+.line__price--struck { text-decoration: line-through; }
+
+.line__price-discounted {
+  margin: 3px 0 0;
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.line__discount-notice {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.line__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.line__remove {
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--warn);
+  font-family: inherit;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.line__remove:disabled { opacity: 0.45; cursor: default; }
+
+.line__total {
+  margin: 0;
+  font-family: var(--font-num);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 전체 비우기 버튼 (3차). 항목이 0개일 때는 hidden 속성만 붙고 요소는 DOM에 남는다 —
+   위의 [hidden] { display: none !important; } 규칙이 이 display:block을 이긴다 (PRD 11.5 / 14.1). */
+.cart-clear {
+  display: block;
+  margin: 16px 0 0 auto;
+  padding: 9px 16px;
+  font-size: 12.5px;
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.cart-clear:hover { background: var(--tint-b); }
+
+.summary {
+  margin: 26px 0 0;
+  margin-left: auto;
+  max-width: 360px;
+}
+
+.summary__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.summary__leader {
+  flex: 1 1 auto;
+  min-width: 12px;
+  height: 0;
+  margin-bottom: 0.42em;
+  border-bottom: 1px dotted var(--rule);
+}
+
+.summary__value {
+  font-family: var(--font-num);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.summary__row--total {
+  padding-top: 12px;
+  border-top: 1px solid var(--ink);
+  font-size: 15px;
+}
+
+.summary__row--total .summary__value { font-size: 18px; }
+
+@media (max-width: 520px) {
+  .line {
+    grid-template-columns: 72px minmax(0, 1fr);
+    row-gap: 10px;
+  }
+  .line__total { grid-column: 2; text-align: left; }
+  .summary { max-width: none; }
+}

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>하루상점 — 장바구니</title>
+  <meta name="description" content="하루상점 장바구니 화면입니다.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div class="mark">
+        <a class="mark__home" href="/">
+          <span class="mark__latin">HARU STORE</span>
+        </a>
+        <span class="mark__ko">하루상점 · 매일 쓰는 것들</span>
+      </div>
+      <div class="masthead__aside">
+        <a class="cart-link" data-testid="cart-link" href="/cart.html" aria-current="page">
+          <span class="cart-link__label">장바구니</span>
+          <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shelf">
+    <h1 class="shelf__title">장바구니</h1>
+    <p class="backlink"><a href="/">← 판매 중인 상품</a></p>
+
+    <!-- 상태 영역: cart-loading / cart-list / cart-empty / cart-error 중 항상 하나만 보인다 (PRD 7.9) -->
+    <div class="cart-skeleton" data-testid="cart-loading" id="cart-loading" aria-live="polite" aria-busy="true">
+      <span class="sr-only">장바구니를 불러오는 중입니다.</span>
+      <span class="skeleton__line skeleton__line--desc" aria-hidden="true"></span>
+      <span class="skeleton__line skeleton__line--desc" aria-hidden="true"></span>
+    </div>
+
+    <div class="notice" data-testid="cart-empty" id="cart-empty" hidden>
+      <p class="notice__title">장바구니가 비어 있습니다</p>
+      <p class="notice__body">마음에 드는 상품을 담아보세요.</p>
+      <p class="notice__action"><a href="/">상품 목록으로 가기</a></p>
+    </div>
+
+    <div class="notice notice--error" data-testid="cart-error" id="cart-error" hidden role="alert">
+      <p class="notice__title" id="cart-error-title">장바구니를 불러오지 못했습니다</p>
+      <p class="notice__body" id="cart-error-body">잠시 후 다시 시도해 주세요.</p>
+      <p class="notice__action">
+        <button class="btn" type="button" id="cart-retry">다시 불러오기</button>
+      </p>
+    </div>
+
+    <ul class="lines" data-testid="cart-list" id="cart-list" hidden></ul>
+
+    <!-- 전체 비우기: 확인 다이얼로그 없이 클릭 한 번이 곧 실행이다 (PRD D10 / 11.4).
+         담긴 항목이 0개면 요소는 DOM에 남기고 hidden 처리만 한다 (PRD 11.5 / 14.1
+         — cart-count와 같은 규칙. 할인 요소 2개는 반대로 "부재"다, PRD 14.4). -->
+    <button class="btn cart-clear" type="button" data-testid="cart-clear" id="cart-clear" hidden>장바구니 비우기</button>
+
+    <!-- 합계 요약: 목록이 보일 때만 함께 보인다. 빈 상태에서는 숨긴다 (PRD 7.7) -->
+    <div class="summary" data-testid="cart-summary" id="cart-summary" hidden>
+      <p class="summary__row">
+        <span class="summary__label">총 수량</span>
+        <span class="summary__leader" aria-hidden="true"></span>
+        <span class="summary__value" data-testid="cart-total-quantity" id="cart-total-quantity">0</span>
+      </p>
+      <p class="summary__row summary__row--total">
+        <span class="summary__label">총 금액</span>
+        <span class="summary__leader" aria-hidden="true"></span>
+        <span class="summary__value" data-testid="cart-total-price" id="cart-total-price">0원</span>
+      </p>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>하루상점 — 장바구니 화면</p>
+  </footer>
+
+  <script src="/cart-badge.js"></script>
+  <script src="/cart.js"></script>
+</body>
+</html>

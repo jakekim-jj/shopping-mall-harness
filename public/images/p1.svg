@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600" role="img" aria-label="베이직 코튼 티셔츠">
+  <rect width="600" height="600" fill="#e8f0fe"/>
+  <circle cx="300" cy="250" r="110" fill="#1a56db" opacity="0.14"/>
+  <text x="300" y="270" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="40" font-weight="700" fill="#1a56db" text-anchor="middle">P1</text>
+  <text x="300" y="430" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif" font-size="34" fill="#1a56db" text-anchor="middle">베이직 코튼 티셔츠</text>
+</svg>

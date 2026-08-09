@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>하루상점 — 상품 상세</title>
+  <meta name="description" content="하루상점 상품 상세 화면입니다.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div class="mark">
+        <a class="mark__home" href="/">
+          <span class="mark__latin">HARU STORE</span>
+        </a>
+        <span class="mark__ko">하루상점 · 매일 쓰는 것들</span>
+      </div>
+      <div class="masthead__aside">
+        <a class="cart-link" data-testid="cart-link" href="/cart.html">
+          <span class="cart-link__label">장바구니</span>
+          <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shelf">
+    <!-- 목록으로 돌아가는 링크 (PRD 6.11). 상태 요소가 아니라 항상 보인다. -->
+    <p class="backlink"><a href="/">← 판매 중인 상품</a></p>
+
+    <!-- 상태 영역: detail-loading / product-detail / detail-not-found / detail-error 중 항상 하나만 보인다 (PRD 6.10) -->
+    <div class="detail-skeleton" data-testid="detail-loading" id="detail-loading" aria-live="polite" aria-busy="true">
+      <span class="sr-only">상품 정보를 불러오는 중입니다.</span>
+      <span class="detail-skeleton__panel" aria-hidden="true"></span>
+      <span class="detail-skeleton__body" aria-hidden="true">
+        <span class="skeleton__line skeleton__line--name"></span>
+        <span class="skeleton__line skeleton__line--price"></span>
+        <span class="skeleton__line skeleton__line--desc"></span>
+      </span>
+    </div>
+
+    <div class="notice" data-testid="detail-not-found" id="detail-not-found" hidden>
+      <p class="notice__title">상품을 찾을 수 없습니다</p>
+      <p class="notice__body">주소가 잘못되었거나 판매가 종료된 상품입니다.</p>
+      <p class="notice__action"><a href="/">상품 목록으로 돌아가기</a></p>
+    </div>
+
+    <div class="notice notice--error" data-testid="detail-error" id="detail-error" hidden role="alert">
+      <p class="notice__title">상품 정보를 불러오지 못했습니다</p>
+      <p class="notice__body">잠시 후 페이지를 새로고침해 주세요.</p>
+      <p class="notice__action"><a href="/">상품 목록으로 돌아가기</a></p>
+    </div>
+
+    <article class="detail" data-testid="product-detail" id="product-detail" data-product-id="" hidden>
+      <div class="detail__panel" id="detail-panel">
+        <img class="detail__img" data-testid="detail-image" id="detail-image" src="" alt="">
+        <span class="detail__fallback">이미지 준비 중</span>
+      </div>
+
+      <div class="detail__body">
+        <h1 class="detail__name" data-testid="detail-name" id="detail-name"></h1>
+        <p class="detail__price" data-testid="detail-price" id="detail-price"></p>
+        <p class="detail__desc" data-testid="detail-description" id="detail-description"></p>
+
+        <div class="qty">
+          <span class="qty__label" id="qty-label">수량</span>
+          <button class="qty__btn" type="button" data-testid="quantity-decrease" id="quantity-decrease"
+                  aria-label="수량 1 감소">−</button>
+          <input class="qty__input" data-testid="quantity-input" id="quantity-input"
+                 type="number" inputmode="numeric" min="1" max="99" step="1" value="1"
+                 aria-labelledby="qty-label">
+          <button class="qty__btn" type="button" data-testid="quantity-increase" id="quantity-increase"
+                  aria-label="수량 1 증가">+</button>
+        </div>
+
+        <button class="btn btn--primary" type="button" data-testid="add-to-cart" id="add-to-cart">
+          장바구니에 담기
+        </button>
+
+        <p class="feedback feedback--ok" data-testid="add-to-cart-success" id="add-to-cart-success"
+           role="status" hidden>장바구니에 담았습니다</p>
+        <p class="feedback feedback--bad" data-testid="add-to-cart-error" id="add-to-cart-error"
+           role="alert" hidden></p>
+      </div>
+    </article>
+  </main>
+
+  <footer class="footer">
+    <p>하루상점 — 상품 상세 화면</p>
+  </footer>
+
+  <script src="/cart-badge.js"></script>
+  <script src="/product.js"></script>
+</body>
+</html>

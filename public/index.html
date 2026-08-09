@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>하루상점 — 판매 중인 상품</title>
+  <meta name="description" content="하루상점에서 판매 중인 상품 목록입니다.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div class="mark">
+        <span class="mark__latin">HARU STORE</span>
+        <span class="mark__ko">하루상점 · 매일 쓰는 것들</span>
+      </div>
+      <div class="masthead__aside">
+        <p class="masthead__count" id="product-count">상품을 불러오는 중</p>
+        <a class="cart-link" data-testid="cart-link" href="/cart.html">
+          <span class="cart-link__label">장바구니</span>
+          <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shelf">
+    <h1 class="shelf__title">판매 중인 상품</h1>
+
+    <!-- 상태 영역: loading / empty / error / product-list 중 항상 하나만 보인다 -->
+    <div class="skeletons" data-testid="loading-state" id="loading-state" aria-live="polite" aria-busy="true">
+      <span class="sr-only">상품을 불러오는 중입니다.</span>
+      <div class="skeleton" aria-hidden="true"><span class="skeleton__panel"></span><span class="skeleton__line skeleton__line--name"></span><span class="skeleton__line skeleton__line--desc"></span><span class="skeleton__line skeleton__line--price"></span></div>
+      <div class="skeleton" aria-hidden="true"><span class="skeleton__panel"></span><span class="skeleton__line skeleton__line--name"></span><span class="skeleton__line skeleton__line--desc"></span><span class="skeleton__line skeleton__line--price"></span></div>
+      <div class="skeleton" aria-hidden="true"><span class="skeleton__panel"></span><span class="skeleton__line skeleton__line--name"></span><span class="skeleton__line skeleton__line--desc"></span><span class="skeleton__line skeleton__line--price"></span></div>
+      <div class="skeleton" aria-hidden="true"><span class="skeleton__panel"></span><span class="skeleton__line skeleton__line--name"></span><span class="skeleton__line skeleton__line--desc"></span><span class="skeleton__line skeleton__line--price"></span></div>
+      <div class="skeleton" aria-hidden="true"><span class="skeleton__panel"></span><span class="skeleton__line skeleton__line--name"></span><span class="skeleton__line skeleton__line--desc"></span><span class="skeleton__line skeleton__line--price"></span></div>
+      <div class="skeleton" aria-hidden="true"><span class="skeleton__panel"></span><span class="skeleton__line skeleton__line--name"></span><span class="skeleton__line skeleton__line--desc"></span><span class="skeleton__line skeleton__line--price"></span></div>
+      <div class="skeleton" aria-hidden="true"><span class="skeleton__panel"></span><span class="skeleton__line skeleton__line--name"></span><span class="skeleton__line skeleton__line--desc"></span><span class="skeleton__line skeleton__line--price"></span></div>
+      <div class="skeleton" aria-hidden="true"><span class="skeleton__panel"></span><span class="skeleton__line skeleton__line--name"></span><span class="skeleton__line skeleton__line--desc"></span><span class="skeleton__line skeleton__line--price"></span></div>
+    </div>
+
+    <div class="notice" data-testid="empty-state" id="empty-state" hidden>
+      <p class="notice__title">판매 중인 상품이 없습니다</p>
+      <p class="notice__body">새 상품이 등록되면 이곳에 표시됩니다.</p>
+    </div>
+
+    <div class="notice notice--error" data-testid="error-state" id="error-state" hidden role="alert">
+      <p class="notice__title">상품을 불러오지 못했습니다</p>
+      <p class="notice__body">잠시 후 페이지를 새로고침해 주세요.</p>
+    </div>
+
+    <ul class="grid" data-testid="product-list" id="product-list" hidden></ul>
+  </main>
+
+  <footer class="footer">
+    <p>하루상점 — 상품 목록 화면</p>
+  </footer>
+
+  <script src="/cart-badge.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
