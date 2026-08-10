@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>하루상점 — 결제</title>
+  <meta name="description" content="하루상점 모의 결제 화면입니다. 실제 결제대행사와 연동하지 않는 모의(mock) 결제입니다.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div class="mark">
+        <a class="mark__home" href="/">
+          <span class="mark__latin">HARU STORE</span>
+        </a>
+        <span class="mark__ko">하루상점 · 매일 쓰는 것들</span>
+      </div>
+      <div class="masthead__aside">
+        <a class="cart-link" data-testid="cart-link" href="/cart.html">
+          <span class="cart-link__label">장바구니</span>
+          <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shelf">
+    <h1 class="shelf__title">결제</h1>
+    <!-- 장바구니로 돌아가는 링크 (PRD 16.3, 6.11과 같은 성격). 상태 요소가 아니라 항상 보인다. -->
+    <p class="backlink"><a href="/cart.html">← 장바구니</a></p>
+
+    <!-- 상태 영역: checkout-loading / checkout-empty / checkout-ready(정상: 요약+폼) 중 하나만 보인다 (PRD 16.17).
+         checkout-error는 이 셋과 다른 축으로 토글된다 — 초기 로드 실패 시 단독으로,
+         결제 요청 실패(400/402/409/5xx/네트워크) 시에는 checkout-ready 위에 겹쳐서 보인다. -->
+    <div class="cart-skeleton" data-testid="checkout-loading" id="checkout-loading" aria-live="polite" aria-busy="true">
+      <span class="sr-only">주문 정보를 불러오는 중입니다.</span>
+      <span class="skeleton__line skeleton__line--desc" aria-hidden="true"></span>
+      <span class="skeleton__line skeleton__line--desc" aria-hidden="true"></span>
+    </div>
+
+    <!-- 장바구니가 비어 있으면 폼 자체를 그리지 않는다 — 빈 장바구니로 결제 요청을 보낼 수 있는
+         상태로 두지 않는다 (PRD 16.16). -->
+    <div class="notice" data-testid="checkout-empty" id="checkout-empty" hidden>
+      <p class="notice__title">장바구니가 비어 있습니다</p>
+      <p class="notice__body">결제할 상품이 없습니다. 상품을 담고 다시 시도해 주세요.</p>
+      <p class="notice__action"><a href="/">상품 목록으로 가기</a></p>
+    </div>
+
+    <!-- 결제 요청 실패 안내. 400·402·409·5xx·네트워크 오류를 모두 이 하나의 요소로 표시한다 (PRD 19.9).
+         409(빈 장바구니)일 때만 상품 목록 링크가 함께 보인다 (PRD 16.14). -->
+    <div class="alert alert--error" data-testid="checkout-error" id="checkout-error" hidden role="alert">
+      <p class="alert__message" id="checkout-error-message"></p>
+      <p class="alert__action" id="checkout-error-action" hidden><a href="/">상품 목록으로 가기</a></p>
+    </div>
+
+    <div id="checkout-ready" hidden>
+      <!-- 주문 요약: 읽기 전용이다. 수량 증감/삭제/비우기 버튼이 없고, 이 화면에서는
+           PATCH/DELETE 계열 장바구니 API를 호출하지 않는다 (PRD 16.2). 금액은 서버 값을
+           그대로 포맷팅만 해서 표시하며(PRD 16.4), 할인 UI(취소선/할인가/안내문구)는
+           만들지 않는다(PRD 16.5) — 할인이 이미 반영된 금액만 보여준다. -->
+      <section class="checkout-summary" data-testid="checkout-summary" id="checkout-summary">
+        <ul class="summary-lines" id="checkout-item-list"></ul>
+        <div class="summary">
+          <p class="summary__row">
+            <span class="summary__label">총 수량</span>
+            <span class="summary__leader" aria-hidden="true"></span>
+            <span class="summary__value" data-testid="checkout-total-quantity" id="checkout-total-quantity">0</span>
+          </p>
+          <p class="summary__row summary__row--total">
+            <span class="summary__label">총 금액</span>
+            <span class="summary__leader" aria-hidden="true"></span>
+            <span class="summary__value" data-testid="checkout-total-price" id="checkout-total-price">0원</span>
+          </p>
+        </div>
+      </section>
+
+      <!-- 주문자 정보 2개 + 모의 결제 수단 2개가 입력의 전부다 (PRD 16.6/16.7).
+           배송지·이메일·카드정보 등은 만들지 않는다. 프론트는 입력 검증을 하지 않으므로
+           required/pattern/minlength/maxlength 같은 HTML5 검증 속성도 쓰지 않는다 (PRD 16.18). -->
+      <form class="checkout-form" id="checkout-form" novalidate>
+        <div class="field">
+          <label class="field__label" for="orderer-name">주문자 이름</label>
+          <input class="field__input" type="text" id="orderer-name" data-testid="orderer-name" autocomplete="name">
+        </div>
+        <div class="field">
+          <label class="field__label" for="orderer-phone">연락처</label>
+          <input class="field__input" type="text" id="orderer-phone" data-testid="orderer-phone"
+                 autocomplete="tel" placeholder="010-1234-5678">
+        </div>
+
+        <fieldset class="payment-method">
+          <legend class="field__label">결제 수단 (모의 결제 — 실제 결제대행사와 연동하지 않습니다)</legend>
+          <label class="payment-method__option">
+            <input type="radio" name="payment-method" id="payment-method-success"
+                   data-testid="payment-method-success" value="MOCK_SUCCESS" checked>
+            모의 결제 (승인 성공)
+          </label>
+          <label class="payment-method__option">
+            <input type="radio" name="payment-method" id="payment-method-failure"
+                   data-testid="payment-method-failure" value="MOCK_FAILURE">
+            모의 결제 (승인 거절 — 실패 테스트용)
+          </label>
+        </fieldset>
+
+        <button class="btn btn--primary" type="submit" data-testid="checkout-submit" id="checkout-submit">결제하기</button>
+      </form>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>하루상점 — 결제 화면 (모의 결제)</p>
+  </footer>
+
+  <script src="/cart-badge.js"></script>
+  <script src="/checkout.js"></script>
+</body>
+</html>

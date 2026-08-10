@@ -597,6 +597,125 @@ if (item.discountApplied) {              // ← 서버가 준 boolean. 이것이
 
 기존 재량(스토어 이름, 카드 `description` 표시, `add-to-cart-error`, "다시 불러오기" 버튼)은 그대로 유지했다.
 
+---
+
+# 4차 사이클 — 모의 결제 (2026-08-10)
+
+> 1~22절(1~3차)은 그대로 유효하며 재구현 대상이 아니다. 이번에 추가된 것은 **23절 이후**뿐이다.
+
+## 23. 이번 사이클에 만든 것
+
+| 파일 | 내용 |
+|---|---|
+| `public/checkout.html` / `public/checkout.js` (신규) | 결제 화면(`/checkout.html`) — 주문 요약(읽기 전용) + 주문자 정보 2개 입력 + 모의 결제 수단 라디오 2개 + 결제하기 버튼 |
+| `public/order.html` / `public/order.js` (신규) | 주문 확인 화면(`/order.html?orderId=...`) — 주문번호·상태·일시·주문자·상품 줄·합계 표시 |
+| `public/cart.html` (수정) | "결제하기" 링크(`checkout-link`) 추가 — 장바구니 화면에만 두는 유일한 결제 진입점 (PRD 15.3) |
+| `public/cart.js` (수정) | `checkout-link`의 hidden 토글을 `cart-clear`/`cart-summary`와 같은 `showOnly('list')` 조건에 추가 (서로 독립적으로 토글되며 15.5를 어기지 않음) |
+| `public/cart-badge.js` (수정) | 기존 비공개 함수 `mapCartItem`을 `window.HaruCart.mapLineItem`으로 공개 — `order.js`가 `order.items`(CartItem과 동일 11개 필드)를 매핑할 때 새 매핑 함수를 만들지 않고 재사용 |
+| `public/styles.css` (수정) | 4차 전용 블록 추가 — `.cart-checkout`(결제 진입 버튼), `.summary-lines`/`.summary-line`(결제·주문 확인 공용 읽기 전용 줄), `.checkout-form`/`.field`/`.payment-method`(입력 폼), `.alert`(`checkout-error` 단일 요소), `.order-meta`(주문 메타 정보) |
+
+기존 7개 API·5개 화면(상품 목록/상세/장바구니 + 그 안의 상태들)은 **한 글자도 고치지 않았다** — `cart.js`의 `showOnly()`에 한 줄(체크아웃 링크 토글) 추가한 것이 유일한 기존 파일 로직 변경이다.
+
+## 24. 화면명 — 호출 API — 기대 응답 shape (4차 신규)
+
+### 결제 화면 (`/checkout.html`)
+
+- **호출 API**
+  - `GET /api/cart` — 화면 진입 시 **한 번만** 호출 (`window.HaruCart.getCart()` 재사용). 이 한 번의 응답으로 주문 요약과 헤더 배지를 **동시에** 채운다. 별도의 `HaruCart.refreshBadge()`(추가 `GET /api/cart`)는 호출하지 않는다.
+  - `POST /api/checkout` — 결제하기 클릭 시. 요청 body는 정확히 `{ ordererName, ordererPhone, paymentMethod }` 3개 필드뿐이며 `items`/`totalPrice`/`quantity`는 절대 담지 않는다.
+- **기대 응답 shape**
+  - `GET /api/cart` 200 → `{ "cart": { "items": [ CartItem(11필드) ], "totalQuantity": N, "totalPrice": N } }` (기존 shape 그대로, cart-badge.js가 이미 매핑)
+  - `POST /api/checkout` 200 → `{ "order": { orderId, status:"PAID", ordererName, ordererPhone, paymentMethod, items(CartItem 11필드), totalQuantity, totalPrice, createdAt } }` — `cartId` 없음
+  - `POST /api/checkout` 402 → `{ "error": { "message": "결제가 승인되지 않았습니다. 다른 결제 수단으로 다시 시도해 주세요." } }`
+  - `POST /api/checkout` 400 → `{ "error": { "message": "..." } }` (이름/연락처/결제수단 3종 중 하나)
+  - `POST /api/checkout` 409 → `{ "error": { "message": "장바구니가 비어 있어 결제할 수 없습니다." } }`
+
+### 주문 확인 화면 (`/order.html?orderId={orderId}`)
+
+- **호출 API**
+  - `GET /api/orders/:orderId` — `orderId`가 URL에 있을 때만 호출(없으면 API 호출 없이 바로 not-found).
+  - `GET /api/cart` — 헤더 배지 갱신용(`HaruCart.refreshBadge()`). 주문 조회와 **별개의 병렬 호출**이지만, 이 화면에 도달하는 시점엔 이미 `cartId` 쿠키가 존재하거나(결제 성공 직후 이동) 쿠키가 없어도 주문 조회 결과가 항상 not-found로 귀결되므로(17.8) M4의 재발 조건(쿠키 없는 상태에서 병렬 호출로 결과가 갈리는 경우)에 해당하지 않는다.
+- **기대 응답 shape**
+  - `GET /api/orders/:orderId` 200 → `POST /api/checkout` 200과 **완전히 동일한 `{ order: {...9필드} }` shape** — 같은 매핑 함수(`mapOrderResponse`)로 처리
+  - `GET /api/orders/:orderId` 404 → `{ "error": { "message": "주문을 찾을 수 없습니다." } }` (없는 주문/남의 주문/쿠키 없음 3종 모두 동일 — 프론트도 구분하지 않음)
+
+## 25. API shape ↔ 화면 모델 매핑 지점 (4차)
+
+- **결제 화면**: 장바구니 응답 매핑은 `cart-badge.js`의 `mapCartResponse()`(= `HaruCart.getCart()`)를 **그대로 재사용**한다. `checkout.js`에는 금액을 계산하는 산술이 전혀 없다 — `item.lineTotalText`, `cart.totalPriceText` 등 이미 매핑된 필드를 그대로 출력만 한다 (PRD 16.4).
+- **주문 확인 화면**: `order.js`의 `mapOrderResponse()` 한 곳이 `{ order: {...} }` 한 겹을 벗기는 유일한 지점이다. `order.items` 각 줄은 CartItem과 완전히 같은 shape이므로, 새 매핑 함수를 만들지 않고 `cart-badge.js`가 공개한 `HaruCart.mapLineItem()`(= 기존 `mapCartItem`)을 그대로 호출한다. shape이 바뀌면 `mapLineItem()` 한 곳만 고치면 두 화면(장바구니 목록의 줄, 주문 확인의 줄)에 동시에 반영된다.
+- **결제 요청**: `POST /api/checkout`은 `{ order }` 성공 응답과 `{ error: { message } }` 실패 응답 두 shape뿐이라, 별도 매핑 함수 없이 `submitCheckout()`이 `{ status, body }`로만 감싸고 `readErrorMessage()`(cart-badge.js 기존 함수 재사용)로 에러 메시지를 뽑는다.
+
+## 26. `checkout-error` 단일 요소 — 4가지 실패를 하나로 표시하는 방식
+
+PRD 19.9는 400·402·409·5xx·네트워크 오류를 **전부 `checkout-error` 하나**로 표시하라고 못 박았다. 구현은 상태 코드별로 문구와 "상품 목록 링크 노출 여부"만 갈리는 얇은 분기 하나로 처리했다.
+
+| 상태 | 화면 동작 | 상품 목록 링크 |
+|---|---|---|
+| 400 (입력 검증 실패) | `checkout-error`에 서버 메시지 표시, 화면 유지 | 없음 |
+| 402 (승인 거절) | `checkout-error`에 서버 메시지 표시, 입력값·요약 그대로 유지, 화면 유지, **재시도 가능**(성공으로 바꿔 재제출 시 정상 통과 확인) | 없음 |
+| 409 (빈 장바구니) | `checkout-error`에 서버 메시지 표시 | **있음** — `checkout-error-action` 하위 요소가 hidden 해제됨 |
+| 5xx / 네트워크 오류 | `checkout-error`에 일반화된 안내 표시 | 없음 |
+
+같은 `checkout-error` 요소는 **초기 `GET /api/cart` 자체가 실패한 경우**(주문 요약을 그릴 수 없는 "화면 전체 에러" — PRD 16.17 후단)에도 재사용된다. 이때는 `checkout-ready`(요약+폼) 자체가 hidden 상태이므로 `checkout-error`가 화면에서 사실상 단독으로 보인다 — 별도의 테스트 선택자를 새로 만들지 않고 기존 하나로 두 상황을 모두 커버했다(PRD 19장에 이 경우를 위한 별도 선택자가 정의돼 있지 않음).
+
+## 27. data-testid (PRD 19.1~19.19)
+
+**장바구니 화면**: `checkout-link`(19.1) — 항목 0개일 때도 DOM에 남고 `hidden`만 토글.
+
+**결제 화면**: `checkout-summary`(19.2), `checkout-item` + `data-product-id`(19.3), `checkout-item-name`/`checkout-item-quantity`/`checkout-item-total`(19.4), `checkout-total-quantity`/`checkout-total-price`(19.5), `orderer-name`/`orderer-phone`(19.6), `payment-method-success`/`payment-method-failure`(19.7, 초기 선택값 `MOCK_SUCCESS`), `checkout-submit`(19.8), `checkout-error`(19.9), `checkout-loading`/`checkout-empty`(19.10).
+
+**주문 확인 화면**: `order-confirmation` + `data-order-id`(19.11), `order-id`/`order-status`/`order-created-at`/`order-orderer-name`/`order-orderer-phone`(19.12), `order-created-at`은 `<time datetime="...">`로 ISO 원본 보존(19.13), `order-list` + 각 줄 `order-item` + `data-product-id`(19.14), `order-item-name`/`order-item-quantity`/`order-item-total`(19.15), `order-total-quantity`/`order-total-price`(19.16), `order-loading`/`order-not-found`/`order-error`(19.17, 17.7과 17.8 둘 다 `order-not-found`로 통합).
+
+부재/존재 규칙(19.18)도 그대로 지켰다 — `checkout-link`만 "DOM에 남기고 hidden 토글", `checkout-item`/`order-item` 줄들은 데이터가 없으면 DOM에 아예 없다(매 응답마다 다시 그림). 기존 4.x/10.x/14.x 선택자는 이름·위치·의미를 하나도 바꾸지 않았다(19.19).
+
+## 28. `docs/bug-history/` 확인 결과 (작업 전 RAG)
+
+세 문서를 모두 다시 훑었다. 이번 사이클과의 관계:
+
+| ID | 제목 | 이번 범위 관련성 | 반영/판단 |
+|---|---|---|---|
+| **BUG-2026-08-08-01 (M4)** | 장바구니 쿠키 최초 발급 경쟁 조건 | **직접 관련 — PRD 16.1이 결제 화면을 이름으로 지목해 경고한 재발 지점.** "페이지 로드 시 여러 곳에서 각자 장바구니 API를 병렬 호출"하는 패턴이 재발 조건이다 | `checkout.js`는 `GET /api/cart`를 **한 번만** 호출(`loadCheckout()` 안의 `window.HaruCart.getCart()` 단일 호출)하고, 같은 응답으로 주문 요약(`renderSummary`)과 헤더 배지(`updateBadge`)를 **동시에** 채운다. `product.js`/`app.js`가 쓰는 `refreshBadge()`(별도 `GET /api/cart` 추가 호출)를 `checkout.js`에는 **의도적으로 넣지 않았다.** `order.js`는 `GET /api/orders/:orderId` + `GET /api/cart`(배지용) 두 호출이 병렬로 나가지만, PRD 17.10이 이 조합을 명시적으로 허용했고 — 쿠키가 이미 있거나(결제 성공 직후 이동), 쿠키가 없어도 주문 조회는 항상 not-found로 귀결되므로(17.8) 병렬 호출이 화면 결과를 갈라놓지 않는다. M4가 문제였던 지점(같은 목적의 API를 병렬로 불러 결과가 요청 순서에 따라 달라짐)과 구조가 다르다고 판단했다 |
+| **BUG-2026-08-08-02 (M5)** | 공용 에러 핸들러가 엉뚱한 문구를 내보냄 | **백엔드 조치 확인만 함.** API 스펙 §5-4가 `/api/checkout`·`/api/orders` 경로별 분기를 backend-agent가 이미 추가했다고 기록(§5-4 (9)) | 프론트는 그대로 `readErrorMessage()`로 서버 문구를 표시한다 — 서버가 결제/주문 문맥의 문구를 보내는 한 화면도 정확한 문구를 보여준다. 5xx·네트워크 오류에 대한 프론트 쪽 폴백 문구(`결제 요청을 처리하지 못했습니다.` / `주문 정보를 불러오지 못했습니다.`)도 PRD 18.12의 권장 문구와 일치시켰다 |
+| **BUG-2026-08-NOTES (M1/M2/M3)** | 경미 기록 | **M2가 직접 관련.** "DOM 존재 여부"와 "현재 표시 여부"를 구분해 단언하라는 규칙 | `checkout-link`는 **존재+hidden**(19.1/19.18), `checkout-item`/`order-item`은 **부재**(19.18)로 정확히 구분해서 구현했다 — 3차 때(`cart-clear` vs 할인 요소)와 같은 원칙을 그대로 이어갔다 |
+
+## 29. 확인/미확인 사항
+
+### 확인함 (curl 통합 테스트)
+
+서버를 띄우고(`PORT=3457 node server.js`) 쿠키 항아리를 유지하며 프론트 코드가 실제로 보내는 요청과 동일한 흐름을 재현했다.
+
+| 시나리오 | 결과 |
+|---|---|
+| `p1` 2개 담기 → `POST /api/checkout`(`MOCK_SUCCESS`) | `200` / `order.orderId` 형식 `ORD-YYYYMMDD-XXXXXX` 일치, `items`/`totalPrice` 등 9필드 전부 확인 |
+| 결제 직후 `GET /api/cart` | `{"cart":{"items":[],"totalQuantity":0,"totalPrice":0}}` — 장바구니 비워짐 확인 |
+| 같은 쿠키로 `GET /api/orders/:orderId` | 결제 응답과 동일한 `order` shape 재조회 확인 |
+| **쿠키 없이** 같은 `orderId`로 `GET /api/orders/:orderId` | `404` / `주문을 찾을 수 없습니다.` — "남의 주문" 케이스 확인 |
+| 결제 성공 직후 **같은 요청 재전송** | `409` / `장바구니가 비어 있어 결제할 수 없습니다.` — 중복 결제 방지 확인 |
+| `checkout.js`/`order.js`/`cart-badge.js`/`cart.js` | `node --check`로 문법 오류 없음 확인 |
+| `checkout.html`/`checkout.js`/`order.html`/`order.js`/`cart.html` | 정적 서빙 `200` 확인 |
+
+### 아직 확인 못 한 것 (⚠️ qa-agent의 브라우저 확인 필요)
+
+- **실제 이중 클릭 방지** — `submitting` 플래그 + `disabled`로 막지만, 실제 클릭 타이밍은 브라우저에서 확인 필요
+- **402 재시도 흐름의 실제 DOM 상태** — 코드상 입력값을 지우지 않지만, 브라우저 폼 상태가 그대로 남아 있는지는 실제 렌더로 확인 필요
+- **`checkout-empty`/`checkout-error`(초기 로드 실패) 두 상태의 실제 진입** — 서버 테스트 훅(`?simulate=`)이 `/api/cart`에는 없어서, 빈 장바구니(자연 상태)로만 `checkout-empty`를 확인했고 `GET /api/cart` 자체의 5xx는 재현하지 못했다
+- **`<time datetime>` 속성값이 실제 브라우저 DOM에 반영되는지**, 로케일 표시 텍스트(`toLocaleString('ko-KR')`)가 여러 브라우저에서 깨지지 않는지
+- **375px 폭에서 `.summary-line`/`.field`/`.payment-method`의 실제 레이아웃**
+
+## 30. backend-agent에게 — 계약 불일치 없음
+
+API 스펙 §2J(`POST /api/checkout`)·§2K(`GET /api/orders/:orderId`)에 적힌 shape·상태 코드가 **실제 curl 응답과 전부 일치했다.**
+
+- `order` 필드 9개(`orderId`/`status`/`ordererName`/`ordererPhone`/`paymentMethod`/`items`/`totalQuantity`/`totalPrice`/`createdAt`) — `cartId` 없음, 스펙 그대로
+- 200/402/400/409 네 응답 모두 문서화된 shape과 정확히 일치 — `POST /api/checkout` 성공 응답과 `GET /api/orders/:orderId` 성공 응답이 **완전히 같은 shape**이라 `order.js`의 `mapOrderResponse()`를 `checkout.js`에도 그대로 재사용할 수 있었을 정도로 일치도가 높았다(실제로는 결제 성공 후 즉시 리다이렉트하므로 checkout.js는 성공 응답 본문에서 `orderId`만 꺼내 쓴다)
+- 404(없는 주문/남의 주문/쿠키 없음)가 **셋 다 동일한 메시지·상태 코드** — 프론트 분기를 하나로 끝낼 수 있었다
+
+**추측으로 채운 필드 없음. 회신할 불일치 없음.**
+
+## 31. product-planner에게 — 확인 필요한 프론트 재량 사항 없음
+
+이번 사이클은 PRD 16~19장이 선택지를 남기지 않을 정도로 촘촘했다(입력란 2개, 라디오 2개, 에러 요소 1개, 상태 표시 문구까지 표 형태로 확정). 재량으로 결정해야 했던 것은 **표시 텍스트 형식**(주문 일시 로케일 표기, 수량 표기에 `×` 접두어 추가) 정도이며, 전부 PRD 19.13("표시 텍스트 형식은 frontend-agent 재량")이 이미 허용한 범위 안이라 별도로 문의할 사항이 없다.
+
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 사유 |
@@ -604,3 +723,4 @@ if (item.discountApplied) {              // ← 서버가 준 boolean. 이것이
 | 2026-08-05 | 최초 작성 — 상품 목록(홈) 화면 구현 및 3개 상태 검증 | PRD 1.x / 2.x / 4.x 구현 |
 | 2026-08-08 | **2차 사이클 추가(7~14절)** — 상품 상세(`product.html`)·장바구니(`cart.html`) 화면 신규 구현, 목록 카드 링크화 + 공통 헤더 배지 추가, 공용 모듈 `cart-badge.js` 분리. 1~6절(1차 목록 화면 명세)은 그대로 두고 아래에 덧붙임 | PRD 5~10장 / API 스펙 §2A~§2G 구현 |
 | 2026-08-09 | **3차 사이클 추가(15~22절)** — 장바구니 화면에 ① 전체 비우기 버튼(`cart-clear`, `DELETE /api/cart` 1회, 확인 다이얼로그 없음) ② 줄 단위 할인 표시(원가 취소선 + `cart-item-discounted-price` + `cart-item-discount-notice`, 판정은 `discountApplied` 하나) 추가. `cart-badge.js`에 `clearCart()`와 할인 필드 5개 매핑 추가. **`cart-item-total`/`cart-total-price`를 그리는 코드는 의도적으로 무변경** — `lineTotal`의 의미만 바뀌었고 참조 필드는 그대로이므로 서버 값이 바뀌는 즉시 할인 금액이 자동 반영된다. 1~14절은 그대로 두고 아래에 덧붙임 | PRD 11~14장 / API 스펙 §2H·§2I 구현. 실서버 대상 DOM 스텁 검증 77개 항목 전부 통과(19절), `docs/bug-history/` M4·M5·M2 확인 결과는 20절 |
+| 2026-08-10 | **4차 사이클 추가(23~31절)** — 결제 화면(`checkout.html`/`checkout.js`) 신규: 주문 요약(읽기 전용, `GET /api/cart` 1회로 요약+배지 동시 채움) + 주문자 정보 2개 + 모의 결제 라디오 2개 + `POST /api/checkout`. 주문 확인 화면(`order.html`/`order.js`) 신규: `GET /api/orders/:orderId` 조회, 404 통합 처리(없는 주문/남의 주문/쿠키 없음 동일). 장바구니 화면에 `checkout-link` 추가(결제 진입점은 장바구니 화면에만 존재). `cart-badge.js`에 `mapLineItem` 공개 — 주문 확인 화면이 CartItem 매핑을 재사용. `checkout-error` 단일 요소로 400/402/409/5xx/네트워크 5종 실패를 모두 표시(409만 상품 목록 링크 동반). 1~22절(1~3차)은 그대로 두고 아래에 덧붙임 | PRD 15~19장 / API 스펙 §2J·§2K 구현. curl 통합 테스트로 200/402/409/404(남의 주문) 전 경로 확인(29절), `docs/bug-history/` M4(결제 화면 이름으로 지목된 재발 지점)·M5·M2 확인 결과는 28절 |

@@ -203,6 +203,10 @@
     clearCart: clearCart,
     updateBadge: updateBadge,
     hideBadge: hideBadge,
-    refreshBadge: refreshBadge
+    refreshBadge: refreshBadge,
+    // 4차 추가: CartItem(11개 필드) → 화면 모델 매핑을 결제/주문 확인 화면과 공유한다.
+    // order.items는 CartItem과 완전히 동일한 shape이므로(스펙 §2J 데이터 모델 확정 사항),
+    // order.js가 이 함수를 그대로 재사용해 별도의 매핑 함수를 새로 만들지 않는다.
+    mapLineItem: mapCartItem
   };
 })();

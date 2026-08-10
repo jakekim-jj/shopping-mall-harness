@@ -1,8 +1,9 @@
-# 백엔드 API 스펙 — 상품 목록 / 상품 상세 / 장바구니
+# 백엔드 API 스펙 — 상품 목록 / 상품 상세 / 장바구니 / 모의 결제
 
 > 작성: backend-agent / 2026-08-05 (1차: 상품 목록)
 > 개정: backend-agent / 2026-08-08 (2차: 상품 상세 + 장바구니 5개 엔드포인트 추가)
 > 개정: backend-agent / 2026-08-09 (**3차: `DELETE /api/cart` 전체 비우기 + 수량 기반 자동 할인**)
+> 개정: backend-agent / 2026-08-10 (**4차: `POST /api/checkout` 모의 결제 + `GET /api/orders/:orderId` 주문 조회**)
 > 입력: `_workspace/01_planner_prd.md`
 > **이 문서는 frontend-agent가 그대로 믿고 코딩해도 되는 계약(contract)이다.**
 > 여기 적힌 필드명·래핑·상태 코드는 실제 구동 중인 서버에서 curl로 검증된 값이다.
@@ -66,19 +67,22 @@ npm start       # → http://localhost:3000
 | PATCH | `/api/cart/items/:productId` | 줄 수량 변경 | **2차** | ✅ 구현 완료 (§2E) |
 | DELETE | `/api/cart/items/:productId` | 줄 삭제 | **2차** | ✅ 구현 완료 (§2F) |
 | DELETE | `/api/cart` | **장바구니 전체 비우기** | **3차** | ✅ 구현 완료 (§2I) |
+| POST | `/api/checkout` | **모의 결제 요청** | **4차** | ✅ 구현 완료 (§2J) |
+| GET | `/api/orders/:orderId` | **주문 1건 조회** | **4차** | ✅ 구현 완료 (§2K) |
 
 ~~**이번 범위의 API는 위 6개가 전부다** (PRD 9.12).~~
+~~🔁 **[3차 개정 — 2026-08-09] 위 문장은 폐기된다. 이번 범위의 API는 총 7개다** (PRD 13.8).~~
 
-> 🔁 **[3차 개정 — 2026-08-09] 위 문장은 폐기된다. 이번 범위의 API는 총 7개다** (PRD 13.8). `DELETE /api/cart`(전체 비우기)가 범위로 편입되었다 (§2I).
+> 🔁 **[4차 개정 — 2026-08-10] 위 두 문장 모두 폐기된다. 이번 범위의 API는 총 9개다** (PRD 18.13). `POST /api/checkout`(모의 결제), `GET /api/orders/:orderId`(주문 조회)가 범위로 편입되었다 (§2J, §2K). 기존 7개의 경로·메서드·응답 shape은 **하나도 바뀌지 않았다** — 실제 회귀 검증 완료(§5-4 (8)).
 
-`POST /api/checkout`(결제), 쿠폰/프로모션 코드 엔드포인트(`POST /api/cart/coupon` 등), 할인율 조회·변경 엔드포인트, 주문 관련 엔드포인트는 **3차에도 구현하지 않았다** — frontend-agent는 이 경로들을 호출하는 코드를 작성하지 말 것. 호출하면 아래처럼 404 JSON이 돌아온다.
+`GET /api/orders`(목록), 주문 취소/환불, 실제 PG 연동(승인 API·웹훅·`returnUrl` 등), 쿠폰/프로모션 코드, 배송 관련 엔드포인트는 **4차에도 구현하지 않았다** — frontend-agent는 이 경로들을 호출하는 코드를 작성하지 말 것. 호출하면 아래처럼 404 JSON이 돌아온다.
 
 ```
-POST /api/checkout  →  404
+GET /api/orders  →  404
 { "error": { "message": "존재하지 않는 API 경로입니다." } }
 ```
 
-> 1차 문서의 "이번 범위에는 `GET /api/products` 하나뿐"이라는 문장은 위 표로 대체되었다. **§2(GET /api/products)의 스펙 자체는 3차에도 한 글자도 바뀌지 않았다.** §2A~§2F의 경로·메서드·상태 코드·래핑도 전부 그대로이며, 3차에서 바뀐 것은 **장바구니 응답 안 `CartItem`의 필드 구성(6개 → 11개)과 `lineTotal`의 의미** 뿐이다 (§2H).
+> 1차 문서의 "이번 범위에는 `GET /api/products` 하나뿐"이라는 문장은 위 표로 대체되었다. **§2(GET /api/products)의 스펙 자체는 4차에도 한 글자도 바뀌지 않았다.** §2A~§2I의 경로·메서드·상태 코드·래핑도 전부 그대로이며, 4차에서 추가된 것은 **§2J(결제)와 §2K(주문 조회) 두 엔드포인트뿐**이다.
 
 ---
 
@@ -691,6 +695,131 @@ Cookie: cartId=...        ← 없으면 서버가 발급한다 (에러 아님)
 
 ---
 
+## 2J. POST /api/checkout — 모의 결제 요청 (4차 신규)
+
+### 요청
+
+```
+POST /api/checkout HTTP/1.1
+Host: localhost:3000
+Content-Type: application/json
+Cookie: cartId=...        ← 없으면 서버가 발급한다 (그 뒤 즉시 409가 된다 — 장바구니가 비어 있으므로)
+
+{ "ordererName": "홍길동", "ordererPhone": "010-1234-5678", "paymentMethod": "MOCK_SUCCESS" }
+```
+
+- **딱 3개 필드만** 받는다. `items`·`totalPrice`·`quantity` 등 상품·금액 정보는 body에 실려 와도 **서버가 통째로 무시한다** — 결제 대상/금액은 항상 서버가 `cartId` 쿠키의 현재 장바구니에서 `buildCartSnapshot()`으로 직접 계산한다 (PRD 18.1). 프론트는 이 3개 필드 외에 아무것도 보내지 않아도 되고, 보내도 무해하다.
+- `ordererName`/`ordererPhone`은 **trim 후** 검증되고, **trim된 값**으로 저장·응답된다. 하이픈 등 원래 형식은 그대로 유지된다(재조립하지 않음).
+
+### 응답 (200) — 승인 성공 (`paymentMethod === "MOCK_SUCCESS"`)
+
+```json
+{
+  "order": {
+    "orderId": "ORD-20260810-C4GH12",
+    "status": "PAID",
+    "ordererName": "홍길동",
+    "ordererPhone": "010-1234-5678",
+    "paymentMethod": "MOCK_SUCCESS",
+    "items": [
+      {
+        "productId": "p1", "name": "베이직 코튼 티셔츠", "price": 19000, "imageUrl": "/images/p1.svg",
+        "quantity": 10, "lineSubtotal": 190000, "discountApplied": true, "discountPercent": 10,
+        "discountedUnitPrice": 17100, "discountAmount": 19000, "lineTotal": 171000
+      },
+      {
+        "productId": "p7", "name": "러닝 스니커즈", "price": 89000, "imageUrl": "/images/p7.svg",
+        "quantity": 1, "lineSubtotal": 89000, "discountApplied": false, "discountPercent": 0,
+        "discountedUnitPrice": 89000, "discountAmount": 0, "lineTotal": 89000
+      }
+    ],
+    "totalQuantity": 11,
+    "totalPrice": 260000,
+    "createdAt": "2026-08-10T02:34:07.255Z"
+  }
+}
+```
+
+**실제 curl 실행 결과 그대로다** (§5-4). `order` 필드는 정확히 **9개**: `orderId`, `status`, `ordererName`, `ordererPhone`, `paymentMethod`, `items`(CartItem 11개 필드 그대로), `totalQuantity`, `totalPrice`, `createdAt`. **`cartId`는 응답 어디에도 없다** — 서버 내부 `Map`에만 보관되고 `toOrderResponse()`가 응답 직전에 제거한다 (PRD 8.6, `document.cookie`를 프론트가 못 읽는 것과 같은 이유로 body로도 새 나가면 안 된다).
+
+- `orderId` 형식: `ORD-YYYYMMDD-XXXXXX` (`YYYYMMDD`는 UTC, `XXXXXX`는 대문자 영문+숫자 6자리). 정규식 `^ORD-\d{8}-[A-Z0-9]{6}$`.
+- **이 응답과 동시에**(같은 요청 처리 안에서) 서버는 주문을 저장하고 `cartId`의 장바구니를 비운다 (PRD 18.7). 응답 직후 `GET /api/cart`는 `{ "cart": { "items": [], "totalQuantity": 0, "totalPrice": 0 } }`를 반환한다 — **실제 검증됨** (§5-4).
+- `order.items`는 장바구니 배열과 **참조를 공유하지 않는 복사본**이다. `buildCartSnapshot()`이 `.map()`으로 매 줄마다 새 객체를 만들어 반환하므로, 이후 장바구니가 비워져도(`items.length = 0`) 저장된 주문의 `items`는 영향받지 않는다 — **실제 검증됨** (§5-4, 결제 직후 `GET /api/cart`는 빈 배열이지만 같은 주문을 다시 조회하면 여전히 2줄이 나온다).
+
+### 응답 (402) — 승인 거절 (`paymentMethod === "MOCK_FAILURE"`)
+
+```json
+{ "error": { "message": "결제가 승인되지 않았습니다. 다른 결제 수단으로 다시 시도해 주세요." } }
+```
+
+- **200에 `{ "order": { "status": "FAILED" } }`를 담아 보내지 않는다.** 프론트는 상태 코드(402)만으로 실패를 판정해야 하며, body의 `error.message`를 `checkout-error`에 그대로 표시한다.
+- 이 경우 **주문이 저장되지 않고, `orderId`도 발급되지 않고, 장바구니도 비워지지 않는다** — 실제 검증됨(§5-4): 402 직후 `GET /api/cart`를 호출하면 결제 시도 전과 동일한 줄·수량·총액이 그대로 나온다.
+- 판정은 **오직 `paymentMethod` 값**으로만 결정된다. `Math.random()`, 서버 시각, 금액, 이름 등은 판정에 전혀 관여하지 않는다 — 같은 body로 몇 번을 호출해도(장바구니가 비어 있지 않은 한) 항상 같은 결과다.
+
+### 응답 (400) — 입력 검증 실패
+
+| 필드 | 조건 | 메시지 |
+|---|---|---|
+| `ordererName` | 없음 / 문자열 아님 / trim 후 빈 문자열 / trim 후 30자 초과 | `주문자 이름을 1자 이상 30자 이하로 입력해 주세요.` |
+| `ordererPhone` | 없음 / 문자열 아님 / trim 후 `^(01\d-\d{3,4}-\d{4}\|01\d\d{7,8})$` 불일치 | `연락처를 올바른 휴대폰 번호 형식으로 입력해 주세요.` |
+| `paymentMethod` | 없음 / `"MOCK_SUCCESS"`·`"MOCK_FAILURE"` 둘 중 하나가 아님 | `결제 수단을 선택해 주세요.` |
+
+```json
+{ "error": { "message": "주문자 이름을 1자 이상 30자 이하로 입력해 주세요." } }
+```
+
+세 필드는 **표의 순서대로** 검사한다(이름 → 연락처 → 결제수단). 여러 개가 동시에 잘못돼도 첫 번째로 걸리는 필드의 메시지 하나만 온다.
+
+### 응답 (409) — 빈 장바구니
+
+```json
+{ "error": { "message": "장바구니가 비어 있어 결제할 수 없습니다." } }
+```
+
+- **입력이 전부 올바르더라도** 현재 `cartId`의 장바구니 줄이 0개면 이 응답이 온다. `checkout-empty` 화면이 아니라 **결제 요청 중 발생하는 409**라는 점에 유의 — 16.16의 `checkout-empty`(화면 진입 시 바로 표시)와는 다른 시점이다.
+- **검증 순서: 400(입력) → 409(빈 장바구니) → 402(승인 거절)**. 입력이 틀린 채로 `MOCK_FAILURE`를 보내도 결과는 402가 아니라 400이다 — 실제 검증됨(§5-4).
+- 같은 브라우저로 결제에 성공한 직후 **똑같은 요청을 다시 보내면 이번엔 409**가 온다(장바구니가 이미 비었으므로). 이는 의도된 중복 주문 방지 장치다(PRD 18.16, 별도 멱등 키 없음) — 실제 검증됨(§5-4).
+
+### 에러 shape — 결제 공통
+
+모든 에러는 기존과 동일하게 `{ "error": { "message": "..." } }`이고, `code` 같은 추가 필드는 없다. 4차에서 새로 등장하는 상태 코드는 **402**와 **409** 두 개뿐이다.
+
+---
+
+## 2K. GET /api/orders/:orderId — 주문 1건 조회 (4차 신규)
+
+### 요청
+
+```
+GET /api/orders/ORD-20260810-C4GH12 HTTP/1.1
+Host: localhost:3000
+Cookie: cartId=...        ← 없으면 서버가 발급하지만, 이 경우 항상 404가 된다 (기존 주문과 일치할 수 없으므로)
+```
+
+- `GET /api/orders`(목록, 복수형)는 만들지 않았다. 단건 조회 하나뿐이다 (PRD 18.11).
+
+### 응답 (200)
+
+`POST /api/checkout` 성공 응답과 **완전히 동일한 shape**이다 (`{ "order": { ...9개 필드... } }`). 프론트는 결제 성공 응답과 이 조회 응답을 **같은 렌더 함수**로 처리할 수 있다.
+
+- 새로고침해도 서버에서 다시 조회하므로 같은 값이 나온다 — 실제 검증됨(§5-4, F5 시나리오는 "같은 쿠키로 재조회"와 동치).
+
+### 응답 (404) — 아래 세 경우 모두 동일
+
+```json
+{ "error": { "message": "주문을 찾을 수 없습니다." } }
+```
+
+| 경우 | 결과 |
+|---|---|
+| `orderId`가 아예 존재하지 않음 | **404** (위 메시지) |
+| 존재하지만 요청의 `cartId` 쿠키가 그 주문을 만든 `cartId`와 다름 | **404** (위 메시지) — **403이 아니다** |
+| 요청에 `cartId` 쿠키가 아예 없음 | **404** (위 메시지) — 쿠키가 없으면 이 요청 처리 중 새 `cartId`가 발급되고, 그 값은 어떤 기존 주문과도 일치할 수 없으므로 자연스럽게 이 분기로 떨어진다 |
+
+세 경우의 **상태 코드와 메시지가 완전히 같다** — 프론트는 "없는 주문"과 "남의 주문"을 구분할 필요 없이 `order-not-found` 하나로 처리하면 된다(PRD 17.8 / D23). 세 경우 모두 실제 curl로 검증됨(§5-4).
+
+---
+
 ## 3. 상품 목록 응답 계약 요약 — 여기가 1차의 경계면 버그 지점이다
 
 | 결정 | 확정값 | 절대 하지 말 것 |
@@ -979,13 +1108,118 @@ Set-Cookie: cartId=ea546714-96b7-4904-b805-9df316f69b99; Path=/; HttpOnly; SameS
 
 ---
 
+### 5-4. 4차 검증 기록 (2026-08-10, 실제 실행 결과 — `PORT=3456 node server.js`)
+
+#### (1) 빈 장바구니로 결제 → 409
+
+```bash
+curl -s -c jarA.txt -b jarA.txt -w "\nHTTP=%{http_code}\n" -X POST http://localhost:3456/api/checkout \
+  -H "Content-Type: application/json" \
+  -d '{"ordererName":"홍길동","ordererPhone":"010-1234-5678","paymentMethod":"MOCK_SUCCESS"}'
+# → {"error":{"message":"장바구니가 비어 있어 결제할 수 없습니다."}}  HTTP=409  ✅
+```
+
+#### (2) 입력 검증(400) — 6가지 케이스 전부 실제 확인
+
+| 입력 | 결과 |
+|---|---|
+| `ordererName` 누락 | `400` `주문자 이름을 1자 이상 30자 이하로 입력해 주세요.` ✅ |
+| `ordererName` 31자 | `400` 동일 메시지 ✅ |
+| `ordererName` 공백만(`"   "`) | `400` 동일 메시지 ✅ |
+| `ordererName` 정확히 30자 | 400 아님(다음 단계로 통과, 장바구니가 비어 있어 409) ✅ |
+| `ordererName` 1자 | 400 아님(통과) ✅ |
+| `ordererPhone` 공백 구분(`010 1234 5678`) | `400` `연락처를 올바른 휴대폰 번호 형식으로 입력해 주세요.` ✅ |
+| `ordererPhone` 하이픈 혼용(`010-12345678`) | `400` 동일 메시지 ✅ |
+| `ordererPhone` 유선전화(`02-123-4567`) | `400` 동일 메시지 ✅ |
+| `ordererPhone` 하이픈 있음(`010-1234-5678`) | 400 아님(통과) ✅ |
+| `ordererPhone` 하이픈 없음(`01012345678`, `0101234567`) | 400 아님(통과) ✅ |
+| `paymentMethod` 누락 | `400` `결제 수단을 선택해 주세요.` ✅ |
+| `paymentMethod: "CARD"`(허용값 아님) | `400` 동일 메시지 ✅ |
+
+검증 순서(400 → 409 → 402)도 실제로 확인 — 입력이 틀린 채로 보내면 장바구니 상태·`paymentMethod` 값과 무관하게 항상 400이 먼저 온다.
+
+#### (3) 승인 거절(402) — 장바구니/주문 불변
+
+```bash
+# 장바구니에 p1×10(할인 적용), p7×1 담은 상태에서
+curl -s -c jarA.txt -b jarA.txt -w "\nHTTP=%{http_code}\n" -X POST http://localhost:3456/api/checkout \
+  -H "Content-Type: application/json" \
+  -d '{"ordererName":"홍길동","ordererPhone":"010-1234-5678","paymentMethod":"MOCK_FAILURE"}'
+# → {"error":{"message":"결제가 승인되지 않았습니다. 다른 결제 수단으로 다시 시도해 주세요."}}  HTTP=402  ✅
+
+curl -s -b jarA.txt http://localhost:3456/api/cart
+# → totalQuantity:11, totalPrice:260000 — 결제 시도 전과 완전히 동일함을 확인 ✅ (18.4/16.15)
+```
+
+#### (4) 승인 성공(200) — 주문 생성 + 장바구니 비우기, 같은 요청 안에서
+
+```bash
+curl -s -c jarA.txt -b jarA.txt -X POST http://localhost:3456/api/checkout \
+  -H "Content-Type: application/json" \
+  -d '{"ordererName":"  홍길동  ","ordererPhone":" 010-1234-5678 ","paymentMethod":"MOCK_SUCCESS"}'
+```
+
+```json
+{"order":{"orderId":"ORD-20260810-C4GH12","status":"PAID","ordererName":"홍길동","ordererPhone":"010-1234-5678",
+"paymentMethod":"MOCK_SUCCESS","items":[
+  {"productId":"p1","name":"베이직 코튼 티셔츠","price":19000,"imageUrl":"/images/p1.svg","quantity":10,
+   "lineSubtotal":190000,"discountApplied":true,"discountPercent":10,"discountedUnitPrice":17100,
+   "discountAmount":19000,"lineTotal":171000},
+  {"productId":"p7","name":"러닝 스니커즈","price":89000,"imageUrl":"/images/p7.svg","quantity":1,
+   "lineSubtotal":89000,"discountApplied":false,"discountPercent":0,"discountedUnitPrice":89000,
+   "discountAmount":0,"lineTotal":89000}
+],"totalQuantity":11,"totalPrice":260000,"createdAt":"2026-08-10T02:34:07.255Z"}}
+```
+
+- `ordererName`/`ordererPhone`이 **trim되어** 저장·응답됨을 확인(`"  홍길동  "` → `"홍길동"`) ✅
+- 응답에 `cartId` 필드가 **없음**을 `grep`으로 확인 ✅ (PRD 8.6)
+- 이 응답 직후 `curl -b jarA.txt http://localhost:3456/api/cart` → `{"cart":{"items":[],"totalQuantity":0,"totalPrice":0}}` — **같은 요청 처리 안에서 비워졌음을 확인** ✅ (18.7)
+- 비워진 뒤 `curl -b jarA.txt http://localhost:3456/api/orders/ORD-20260810-C4GH12`을 재조회하면 **여전히 `items` 2줄이 그대로 나옴** — 주문 저장 시 장바구니 배열과 참조를 공유하지 않는 복사본임을 확인 ✅ (18.7 "참조 공유 금지")
+
+#### (5) 중복 결제 방지 — 두 번째 호출은 409
+
+같은 `cartId`(jarA)로 성공 직후 동일 body를 다시 `POST /api/checkout`하면 `409` `장바구니가 비어 있어 결제할 수 없습니다.` — **의도된 동작**(PRD 18.16, 별도 멱등 키 없음) ✅
+
+#### (6) `GET /api/orders/:orderId` — 소유자 판정 3가지 경로 모두 확인
+
+| 요청 | 결과 |
+|---|---|
+| 소유 `cartId`(jarA)로 조회 | `200` + checkout 성공 응답과 **완전히 동일한 shape** ✅ |
+| 존재하지 않는 `orderId` | `404` `주문을 찾을 수 없습니다.` ✅ |
+| **다른 `cartId`**(jarB, 새 브라우저 시뮬레이션)로 같은 `orderId` 조회 | `404` **동일 메시지** ✅ (403 아님 — D23) |
+| **쿠키 자체가 없는** 요청으로 조회 | `404` 동일 메시지 ✅ (18.10의 "쿠키 없음도 포함" 확인) |
+
+세 가지 실패 경로(없는 주문 / 남의 주문 / 쿠키 없음)의 **상태 코드와 메시지가 정확히 같음**을 실제로 확인했다 — frontend-agent는 분기 하나로 처리 가능.
+
+#### (7) 경계값 — `ordererName` 1자/30자, `ordererPhone` 4가지 허용 형식
+
+`ordererName`이 정확히 1자·30자일 때 400이 아니라 다음 단계(409, 장바구니가 비어 있으므로)로 넘어감을 확인. `ordererPhone`은 PRD가 명시한 허용 예 `010-1234-5678`, `01012345678`, `010-123-4567`, `0101234567` 4가지 모두 400 없이 통과함을 확인.
+
+#### (8) 기존 7개(1~3차) 엔드포인트 회귀 — checkout/orders 추가가 기존 API에 영향 없음
+
+| 요청 | 결과 |
+|---|---|
+| `GET /api/products/p1` | `200` `{"item":{...}}` (필드·순서 동일) ✅ |
+| `GET /api/products/nope` | `404` `상품을 찾을 수 없습니다.` ✅ |
+| `GET /api/products?simulate=error` | `500` `상품 목록을 불러오지 못했습니다.` ✅ (문구 그대로 유지 — checkout/orders 분기 추가가 이 문구를 건드리지 않음) |
+| `GET /api/unknown` | `404` `존재하지 않는 API 경로입니다.` ✅ |
+| `POST /api/checkout`에 깨진 JSON body | `400` `요청 본문(JSON)을 해석할 수 없습니다.` ✅ (기존 parse-fail 핸들러가 그대로 적용됨) |
+
+**기존 7개 엔드포인트의 경로·상태 코드·에러 문구·래핑이 하나도 바뀌지 않았음을 확인했다.**
+
+#### (9) M5(공용 에러 핸들러) 반영 확인 — 코드 리뷰
+
+`server.js`의 공용 500 핸들러에 `req.path.startsWith('/api/checkout')` → `결제 요청을 처리하지 못했습니다.`, `req.path.startsWith('/api/orders')` → `주문 정보를 불러오지 못했습니다.` 분기를 추가했다(PRD 18.12 권장 문구 그대로). 결제/주문 API에서 5xx가 나도 더 이상 "상품 목록을 불러오지 못했습니다."가 나가지 않는다. `/api/products*`, `/api/cart*` 분기는 3차 그대로 유지했으므로 기존 문구는 바뀌지 않았다. (인위적으로 500을 트리거하는 테스트 훅은 이번 사이클에서 만들지 않았다 — PRD에 결제/주문용 `simulate=error` 훅이 명세되어 있지 않기 때문이며, 분기 로직은 문자열 비교 하나뿐이라 코드 리뷰로 충분하다고 판단했다.)
+
+---
+
 ## 6. 파일 위치
 
 | 파일 | 역할 |
 |---|---|
 | `package.json` | `npm start` → `node server.js`, 의존성 `express@^4.19.2` (**2차에서 새 의존성 추가 없음**) |
-| `server.js` | Express 앱. 정적 서빙 + `express.json()` + **API 7개**(3차: `DELETE /api/cart` 추가) + 장바구니 저장소(`Map`) + 할인 계산(`buildCartLine`/`buildCartSnapshot`) + 에러 핸들러. **3차에서도 새 파일·새 의존성 없음** |
-| `data/products.js` | 시드 상품 8개 (`module.exports = { products }`) — **2차에서 변경 없음** |
+| `server.js` | Express 앱. 정적 서빙 + `express.json()` + **API 9개**(3차: `DELETE /api/cart` 추가, 4차: `POST /api/checkout` + `GET /api/orders/:orderId` 추가) + 장바구니 저장소(`Map<cartId, CartItem[]>`) + **주문 저장소(`Map<orderId, Order>`, 4차 신규)** + 할인 계산(`buildCartLine`/`buildCartSnapshot`) + 주문번호 발급(`generateOrderId`) + 에러 핸들러. **4차에서도 새 파일·새 의존성 없음** |
+| `data/products.js` | 시드 상품 8개 (`module.exports = { products }`) — **2차 이후 변경 없음** |
 | `public/images/p1.svg` … `p8.svg` | 상품 플레이스홀더 이미지 (백엔드 생성, 외부 네트워크 불필요) |
 | `public/index.html` | frontend-agent가 만든 목록 화면. `/`에서 서빙 중 |
 | `public/product.html`, `public/cart.html` | **frontend-agent가 만들 2차 파일.** `public/`에 두기만 하면 자동 서빙됨 (서버 수정 불필요, PRD D9) |
@@ -1019,6 +1253,19 @@ Set-Cookie: cartId=ea546714-96b7-4904-b805-9df316f69b99; Path=/; HttpOnly; SameS
   상태 코드(500)와 응답 shape(`{ error: { message } }`)은 **바뀌지 않았다.** 다음 사이클에서 `POST /api/checkout`을 추가하는 사람은 결제용 문구 분기를 한 줄 더 넣기만 하면 된다.
 - 🐛 **BUG-2026-08-08-01(M4, 쿠키 최초 발급 경쟁 조건)은 이번 범위에서 재발 조건이 아니다.** 비우기는 사용자의 명시적 클릭 1회로 발생하는 **단발 요청**이고, 할인은 기존 스냅샷 응답에 필드만 추가한 것이라 **페이지 로드 시 병렬 호출을 새로 만들지 않는다.** 다만 **M4는 여전히 미수정 상태**이므로, frontend-agent는 장바구니 화면에서 "진입과 동시에 `GET /api/cart` + 다른 상태 확인"을 **병렬로** 쏘는 구조를 새로 만들지 말 것 (기존대로 배지도 같은 응답의 `totalQuantity`를 재사용하면 호출이 늘지 않는다).
 
+### 4차 구현 메모 (backend-agent → qa-agent / frontend-agent)
+
+- **작업 시작 전 `docs/bug-history/`를 확인했다.** 확인한 3개 문서와 이번 사이클에서의 반영/판단은 다음과 같다.
+  - 🐛 **BUG-2026-08-08-02 (M5, 공용 에러 핸들러 문구) — 직접 반영.** PRD 18.12가 "결제 API를 이름으로 지목해 예고한 재발 지점"이라고 명시했고, 실제로 3차 시점의 공용 500 핸들러는 `/api/products`·`/api/cart`만 분기하고 있어서 그대로 뒀다면 결제 실패 화면에 "상품 목록을 불러오지 못했습니다."가 떴을 것이다. `server.js`의 공용 에러 핸들러에 `/api/checkout` → `결제 요청을 처리하지 못했습니다.`, `/api/orders` → `주문 정보를 불러오지 못했습니다.` 두 분기를 추가해서 막았다 (§5-4 (9)). 기존 두 분기(`/api/products*`, `/api/cart*`)와 상태 코드·shape은 전혀 건드리지 않았다.
+  - 🐛 **BUG-2026-08-08-01 (M4, 쿠키 최초 발급 경쟁 조건) — 재발 조건 아님으로 판단.** M4는 "화면 진입과 동시에 장바구니 관련 API를 병렬로 여러 번 호출"하는 프론트 패턴에서 터진다. 이번에 만든 두 백엔드 엔드포인트(`POST /api/checkout`, `GET /api/orders/:orderId`) 자체는 각각 단발 요청이며 병렬 호출 패턴을 서버 쪽에 새로 만들지 않는다. 다만 PRD 16.1이 "결제 화면은 `GET /api/cart` 한 번으로 요약+배지를 동시에 채우고 별도 호출을 하지 않는다"고 명시적으로 M4를 인용해 경고하므로, 이 부분은 **frontend-agent 구현 시점의 책임**이라고 판단해 여기서는 반영 없이 API spec에 그대로 안내만 남긴다 (§2J 주변 참고).
+  - 🐛 **BUG-2026-08-NOTES (M1/M2/M3) — 이번 사이클과 직접 관련 없음.** M1(에러 메시지 노출)은 이번에 결제/주문에서 상태별로 다른 메시지를 서버가 보내기 시작하므로 "한쪽만 바꾸면 안 된다"는 M1의 경고가 그대로 유효하다 — frontend-agent가 `checkout-error`/`order-error`에 서버 메시지를 반드시 노출해야 한다는 점을 여기 다시 짚어둔다. M2(존재/숨김 구분)는 PRD 19.18이 이미 `checkout-link`(hidden 토글)와 `checkout-item`/`order-item`(존재/부재)을 구분해 명시했으므로 프론트 몫이다. M3은 이번 범위와 무관.
+- **주문 저장소는 `server.js` 안의 `Map<orderId, Order>`**다. 장바구니와 마찬가지로 별도 파일·DB를 두지 않았다. 저장 형태는 응답용 9개 필드 + 서버 내부 전용 `cartId` 1개, 총 10개 키다. 응답을 만들 때 `toOrderResponse()`가 구조분해 나머지 연산자(`const { cartId, ...publicOrder }`)로 `cartId`를 제거한다 — 실수로 흘리는 것을 코드 한 곳에서 막는다.
+- **결제 판정은 `paymentMethod` 문자열 비교 두 줄이 전부다.** `Math.random()`, `Date.now()`, 금액을 판정 조건에 넣지 않았다 — PRD 18.3이 요구하는 "같은 입력이면 항상 같은 결과"를 코드 구조로 보장한다. `orderId`의 6자리 접미사를 만드는 데는 `crypto.randomInt()`를 쓰지만, 이건 **주문번호의 고유성**을 위한 것이지 승인/거절 판정과 무관하다 (§2J 주석에 이 구분을 명시해뒀다).
+- **주문 생성 시 `items`는 `buildCartSnapshot(items).cart.items`를 그대로 쓴다.** 이 함수는 각 줄을 `buildCartLine()`으로 매번 새로 만들어 반환하므로, 장바구니의 원본 배열과 참조를 공유하지 않는 새 배열/새 객체다. 별도의 `JSON.parse(JSON.stringify(...))` 같은 깊은 복사 코드를 추가하지 않아도 18.7의 "참조 공유 금지"가 만족된다 — 실제로 결제 직후 장바구니를 비운 뒤 주문을 재조회해도 `items`가 그대로 남아 있음을 확인했다 (§5-4 (4)).
+- **주문번호 형식(`ORD-YYYYMMDD-XXXXXX`)은 UTC 날짜 + 대문자영숫자 6자리이며, 충돌 시 재발급(`do...while (orders.has(orderId))`)한다.** 실제 운영 트래픽 규모를 고려하면 충돌 확률은 매우 낮지만, PRD가 "생성 시 이미 존재하는 키면 다시 생성한다"고 명시했으므로 그대로 구현했다.
+- `POST /api/checkout`, `GET /api/orders/:orderId` 모두 **`/api` catch-all 404 핸들러보다 위**에 등록했다 (2차 메모의 규칙을 그대로 따름).
+- `ordererPhone`은 **정규화(하이픈 제거/추가)하지 않고 trim만** 해서 저장한다 — PRD 데이터 모델이 "입력한 그대로 저장·반환"을 명시했기 때문이다. frontend-agent는 표시할 때 서버가 준 문자열을 그대로 쓰면 된다.
+
 ---
 
 ## 변경 이력
@@ -1028,3 +1275,4 @@ Set-Cookie: cartId=ea546714-96b7-4904-b805-9df316f69b99; Path=/; HttpOnly; SameS
 | 2026-08-05 | 최초 작성 — `GET /api/products` 스펙 확정 및 실서버 curl 검증 | PRD 3.1~3.6 구현 완료 |
 | 2026-08-08 | **2차 사이클 추가** — `GET /api/products/:id`(§2A), 장바구니 공통 규약·쿠키(§2B), `GET /api/cart`(§2C), `POST /api/cart/items`(§2D), `PATCH /api/cart/items/:productId`(§2E), `DELETE /api/cart/items/:productId`(§2F), 장바구니 계약 요약(§2G), 2차 검증 기록(§5-2) 추가. §1 엔드포인트 목록을 6개로 갱신 | PRD 9.1~9.13 구현 완료. **§2(`GET /api/products`)의 스펙과 구현은 변경 없음** — 1차 회귀 검증도 §5-2에 기록 |
 | 2026-08-09 | **3차 사이클 추가** — ① **`CartItem` 재정의(§2H)**: 할인 필드 5개(`lineSubtotal`·`discountApplied`·`discountPercent`·`discountedUnitPrice`·`discountAmount`) 추가로 필드 6개 → **11개**, **`lineTotal`의 의미를 "할인 후 최종 금액"으로 변경**, `totalPrice`는 할인 반영 합계. ② **`DELETE /api/cart`(§2I)** 신규 — 200 + 빈 스냅샷, 멱등, 에러 케이스 없음, 라우팅 충돌 검증. ③ 문서 최상단에 **파괴적 변경 경고 배너** 추가, §1 목록을 7개로 갱신, §2B의 2차 예시·표에 "옛 버전" 표시, §5-2의 "`DELETE /api/cart`는 404" 항목 폐기 표시. ④ **3차 검증 기록(§5-3)** — 9 vs 10 경계, 전수 불변식 792줄, 멱등성, 라우팅, 격리, 1·2차 회귀. ⑤ 공용 500 핸들러 문구를 경로별로 분기 (bug-history M5 반영) | PRD 11~14장 / 13.1~13.9 구현 완료. **기존 6개 엔드포인트의 경로·메서드·상태 코드·에러 문구·래핑은 하나도 바뀌지 않았다** — 회귀 검증을 §5-3 (8)에 기록. `lineTotal` 의미 변경은 이름이 같아 조용히 틀리는 유형이라 배너·§2H·§2B 세 곳에 중복 명시 |
+| 2026-08-10 | **4차 사이클 추가 (모의 결제)** — ① **`POST /api/checkout`(§2J)** 신규 — 200(`{order}`, 9개 필드) / 402(승인 거절) / 400(입력 검증 3종) / 409(빈 장바구니), 검증 순서 400→409→402, 성공 시 같은 요청 안에서 주문 저장 + 장바구니 비우기(참조 비공유). ② **`GET /api/orders/:orderId`(§2K)** 신규 — 200(checkout 성공 응답과 동일 shape) / 404(없는 주문·남의 주문·쿠키 없음 3종을 동일하게 처리, 403 아님). ③ §1 목록을 **9개**로 갱신, 이전 "6개/7개가 전부다" 폐기 문구를 이중 취소선으로 남기고 4차 개정 배너로 대체. ④ **4차 검증 기록(§5-4)** — 입력 검증 12케이스, 402 시 장바구니 불변, 200 시 부수효과(저장+비우기)와 items 참조 비공유, 중복 결제 시 409, 주문 조회 소유자 판정 3경로(없음/남의 것/쿠키없음), 경계값, 기존 7개 회귀, M5 반영 코드 리뷰. ⑤ **공용 500 핸들러에 `/api/checkout`·`/api/orders` 분기 추가** (`docs/bug-history/2026-08-08_generic-error-message-leak.md` BUG-2026-08-08-02, M5 — PRD 18.12가 결제 API를 이름으로 지목해 예고한 재발 지점). ⑥ §6에 **4차 구현 메모** 추가 — 확인한 bug-history 3개 문서와 반영/판단 근거 명시 | PRD 15~19장 / 18.1~18.16 구현 완료. **기존 7개 엔드포인트(§2~§2I)의 경로·메서드·상태 코드·에러 문구·래핑은 하나도 바뀌지 않았다** — 회귀 검증을 §5-4 (8)에 기록. `Order`의 `cartId`는 서버 내부 전용이며 응답에 절대 포함하지 않음(`toOrderResponse()`)을 §2J에서 실측 확인(§5-4 (4)) |

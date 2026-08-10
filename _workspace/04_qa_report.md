@@ -795,3 +795,363 @@ lineTotalText: formatPrice(item.lineTotal)
 | 2026-08-05 | 최초 작성 — PRD 1.1~1.6 / 2.1~2.4 / 3.1~3.6 / 4.1~4.4 전수 검증. 실서버 curl + Chromium 실렌더 교차 검증. Critical 0 / Important 0 / Minor 3 |
 | 2026-08-08 | **2차 사이클 검증 추가** — PRD 5.1~5.7 / 6.1~6.12 / 7.1~7.10 / 8.1~8.7 / 9.1~9.13 / 10.1~10.13 전수 + 1차 회귀. 실서버 curl(쿠키 항아리 2개) + DOM 스텁 위 실코드 실행 83건 + Chromium 실조작 25건. **최대 위험이었던 응답 깊이 불일치는 실제 버그 아님.** Critical 0 / Important 0 / Minor 2 + 정보성 3 |
 | 2026-08-09 | **3차 사이클 검증 추가** — 우선순위 0의 **bug-history 재발 검증(M4/M5/M2)을 먼저 수행**: M4 재발 없음(화면당 쿠키 발급 요청 1건 실측, 단 근본 원인 미수정 → I7), **M5는 강제 500으로 수정 확인 + `/api/products` 문구 회귀 없음**, M2는 사양화되어 존재/부재 분리 단언으로 준수. PRD 11.1~11.8 / 12.1~12.15 / 13.1~13.9 / 14.1~14.6 전수 + 1·2차 회귀. **9-vs-10 경계 함정**(curl 실측 + 792줄 전수 + 브라우저 요소 존재 단언)과 **`lineTotal` 의미 변경 회귀**(리터럴 코드 확인 + 실브라우저 금액 대조) 둘 다 통과. 실서버 curl + 전수 불변식 792줄(위반 0) + Chromium 실조작 단언 76건(실패 0). Critical 0 / Important 0 / **Minor 1(M6)** + 정보성 2(I6, I7) |
+
+---
+
+# QA 검증 리포트 — 4차 사이클 (모의 결제 — 외부 PG 미연동)
+
+> 작성: qa-agent / 2026-08-10
+> 대상: PRD 15~19장 + `Order` 데이터 모델, API 스펙 §2J/§2K/§5-4, 프론트 23~31절
+> 입력 코드: `server.js`(`POST /api/checkout`, `GET /api/orders/:orderId`, `toOrderResponse`, 공용 500 핸들러), `public/checkout.html`, `public/checkout.js`, `public/order.html`, `public/order.js`, `public/cart.html`·`cart.js`(결제 진입 링크), `public/cart-badge.js`
+> 검증 환경: `PORT=3456 node server.js` (실서버) + Chromium 실브라우저(Playwright 드라이버 직접 구동)
+> 범위 밖(미구현 확인만): 실제 PG 연동, `GET /api/orders` 목록, 주문 취소/환불, 재고
+
+## 결론 (4차)
+
+**Critical 0건 / Important 0건 / Minor 1건 / 정보성 2건 + 회귀 테스트 자산 조치 1건.**
+
+15~19장 전 요구사항이 **PRD·스펙 대비 통과**다. 자기보고를 그대로 받지 않고 **실서버 curl 40여 케이스 + 실브라우저 단언 48건(실패 0) + 375px 레이아웃 2건**을 QA가 독립적으로 재현했다.
+
+| 구분 | 건수 | 내용 |
+|---|---|---|
+| Critical | **0** | — |
+| Important | **0** | — |
+| Minor | **1** | **M8** — `order.js`의 페이지 로드 병렬 2호출에서 **M4 메커니즘(cartId 이중 발급)이 실측 재현됨.** 이번 사이클에서는 관찰 가능한 결함으로 이어지지 않음(조건부 재발 경고) |
+| 정보성 | **2** | **I8** — `checkout-error` 요소가 "화면 전체 에러"와 "요청 실패 오버레이" 두 의미를 겸용 / **I9** — `orders` Map 단조 증가 (I3의 연장, 이번 범위 결함 아님) |
+| 회귀 테스트 자산 | **1** | **T1** — `tests/e2e/cart.spec.js:498` "장바구니 화면에는 결제/주문 버튼이 없다 (7.10)"이 **실패한다.** 7.10이 15.1로 폐기된 결과이며 **제품 결함이 아니라 테스트 노후화**다. 2단계(자동화)에서 반드시 교체할 것 |
+
+**과거 버그 재발 여부 (우선순위 0):** **M5 재발 없음(코드로 직접 확인, 분기 2개 실재) / M4 — 결제 화면은 재발 없음(요청 1건 실측), 주문 확인 화면은 메커니즘 재현되나 영향 없음(M8) / M2 규칙대로 준수(존재-부재 분리 확인).** 상세는 §1.
+
+## 1. 우선순위 0 — `docs/bug-history/` 재발 검증 (검증 시작 전 수행)
+
+3개 문서를 전부 다시 읽고, 각 문서의 **"왜 다시 터질 수 있는가"** 패턴이 4차 새 코드(`server.js` 신규 라우트 / `checkout.js` / `order.js`)에 실제로 나타났는지 **코드와 실행으로 직접** 확인했다.
+
+### BUG-2026-08-08-02 (M5, 공용 에러 핸들러 문구) — **재발 없음. 분기 실재 확인**
+
+M5 문서는 *"결제(체크아웃) API를 추가할 때 지금 있는 공용 500 핸들러를 그대로 물려받으면 결제 실패 화면에도 '상품 목록을 불러오지 못했습니다'가 뜰 것"* 이라고 결제 API를 **이름으로 지목**해 예고했고, PRD 18.12가 이를 요구사항으로 못 박았다.
+
+`server.js:699-723` 공용 에러 핸들러를 직접 읽어 **분기 4개가 실제로 존재**함을 확인했다.
+
+```
+server.js:706   if (req.path.startsWith('/api')) {
+server.js:707     let message = '요청을 처리하지 못했습니다.';        // 중립 폴백 (수정 방향 2)
+server.js:708     if (req.path.startsWith('/api/products'))  → '상품 목록을 불러오지 못했습니다.'
+server.js:711     else if (req.path.startsWith('/api/cart'))     → '장바구니 요청을 처리하지 못했습니다.'
+server.js:713     else if (req.path.startsWith('/api/checkout')) → '결제 요청을 처리하지 못했습니다.'      ← 4차 신규
+server.js:715     else if (req.path.startsWith('/api/orders'))   → '주문 정보를 불러오지 못했습니다.'      ← 4차 신규
+```
+
+- **판정 ✅ 재발 없음.** `/api/checkout`·`/api/orders` 두 분기가 **코드에 실재**하며 문구는 PRD 18.12 권장값과 일치한다.
+- 기존 두 분기(`/api/products`, `/api/cart`)와 상태 코드·응답 shape(`{ error: { message } }`)은 손대지 않았다 → 1~3차 회귀 없음. `GET /api/products?simulate=error` → 500 `상품 목록을 불러오지 못했습니다.` 실측 재확인.
+- 프론트 폴백 문구도 일치시켜 뒀다(`checkout.js:207` `결제 요청을 처리하지 못했습니다.` / `order.js:162` `주문 정보를 불러오지 못했습니다.`) — M1 교훈("서버가 상황별 문구를 보내기 시작하면 프론트도 같이 바꿔야 한다")이 지켜졌다.
+- ⚠️ **한계 고지:** `/api/checkout`·`/api/orders`에는 `?simulate=error` 같은 강제 500 훅이 없어 **런타임 실행으로는 분기를 트리거하지 못했다.** 3차 때 M5를 강제 500으로 실행 검증했던 것과 달리 이번엔 **코드 리딩 + 라우팅 경로 대조**로 판정했다. 분기 조건이 `req.path.startsWith()` 문자열 비교뿐이고 라우트 경로가 정확히 `/api/checkout`·`/api/orders/:orderId`임을 확인했으므로 판정에 실질적 불확실성은 없다.
+
+### BUG-2026-08-08-01 (M4, 쿠키 최초 발급 경쟁 조건) — **결제 화면 재발 없음 / 주문 확인 화면은 메커니즘 재현(→ M8)**
+
+frontend-agent는 *"`order.js`가 `GET /api/orders` + `GET /api/cart` 두 번 호출하지만 M4 패턴이 아니다"* 라고 자체 보고했다. **자기보고를 믿지 않고 쿠키 없는 새 컨텍스트로 두 화면의 실제 요청·`Set-Cookie`를 계측**했다.
+
+| 화면 | 첫 방문(쿠키 없음) 시 실제 API 요청 | `Set-Cookie` 발급 횟수 | 판정 |
+|---|---|---|---|
+| `/checkout.html` | `["GET /api/cart"]` — **정확히 1건** | **1회** | ✅ **재발 없음** |
+| `/order.html?orderId=...` | `["GET /api/orders/{id}", "GET /api/cart"]` — **2건 병렬** | **2회, 값이 서로 다름** | ⚠️ **메커니즘 재현 → M8** |
+
+`/order.html` 첫 방문 실측 원문:
+
+```
+Set-Cookie: /api/orders/ORD-... => cartId=46fe83ac-6c6f-4c59-9272-6356602e06aa
+Set-Cookie: /api/cart          => cartId=8b96d987-407a-4d40-99e9-5a872b3322fe
+최종 브라우저 쿠키: cartId=8b96d987-407a-4d40-99e9-5a872b3322fe   ← 나중 것만 남음
+```
+
+- **결제 화면(PRD 16.1이 M4를 인용해 직접 경고한 지점)은 통과다.** `checkout.js:118-122`가 `HaruCart.getCart()` **단일 호출** 결과로 요약(`renderSummary`)과 배지(`updateBadge`)를 **둘 다** 채우고, `refreshBadge()`(추가 `GET /api/cart`)를 의도적으로 넣지 않았다. 계측으로 요청 1건임을 확인했다.
+- **주문 확인 화면은 "쿠키 없는 첫 방문 + 병렬 2요청 → 서로 다른 cartId 2개 발급"이라는 M4의 메커니즘 자체가 그대로 재현된다.** 다만 이번 사이클에서 **관찰 가능한 결함으로 이어지지 않는다** — 판단 근거는 M8에 상세히 적었다.
+- **판정: 이번 사이클 기능 결함 없음. 단 "재발 조건은 실제로 충족됐다"는 사실을 M8로 기록한다.** 3차 리포트의 I7("결제 화면처럼 진입과 동시에 병렬 호출하는 화면이 생기는 순간 재발한다")이 예고한 상황이 절반 실현된 것이므로, 다음 사이클에 이 화면이 장바구니 상태를 **쓰기** 시작하면 즉시 실결함이 된다.
+
+### BUG-2026-08-NOTES (M2, "DOM에 있는지" vs "지금 보이는지") — **규칙대로 준수**
+
+PRD 19.18이 M2를 사양으로 승격시켰다 — `checkout-link`만 "DOM 존재 + hidden 토글", `checkout-item`/`order-item`은 "데이터 없으면 부재".
+
+| 요소 | PRD 규칙 | 실측 | 판정 |
+|---|---|---|---|
+| `checkout-link` (빈 장바구니) | DOM 존재 + hidden | `count()===1` **그리고** `isHidden()===true` | ✅ |
+| `checkout-link` (항목 1개 이상) | 보임 | `isVisible()===true`, `href="/checkout.html"` | ✅ |
+| `checkout-item` | 줄 수만큼 존재 / 없으면 부재 | 2줄일 때 `count()===2`, 빈 화면에선 `checkout-summary` 자체가 hidden | ✅ |
+| `order-item` | 줄 수만큼 존재 | `count()===2` | ✅ |
+| `cart-clear` (4차 회귀) | DOM 존재 + hidden | 3차 규칙 그대로 유지, 결제 링크 추가로 영향 없음 | ✅ |
+
+본 리포트의 모든 단언도 이 구분을 지켰다 — `hidden` 토글 요소는 `isVisible/isHidden`으로, 줄 요소는 `count()`로 단언했다.
+
+## 2. 우선순위 1 — 통합 정합성 (경계면, "양쪽 동시 읽기")
+
+`server.js`와 `checkout.js`/`order.js`를 **동시에 열어** 대조했다. "API가 있다 / 화면이 있다"가 아니라 **같은 필드명·같은 판정 기준을 쓰는지**를 봤다.
+
+### 2.1 요청 body 필드명 — 프론트가 보내는 것 vs 서버가 파싱하는 것 ✅ PASS
+
+| | 프론트 (`checkout.js:176-180`) | 서버 (`server.js:586`) | 일치 |
+|---|---|---|---|
+| 이름 | `ordererName: el.name.value` | `const { ordererName, ... } = body` | ✅ |
+| 연락처 | `ordererPhone: el.phone.value` | `ordererPhone` | ✅ |
+| 결제수단 | `paymentMethod: readSelectedPaymentMethod()` (라디오 `value`) | `paymentMethod` | ✅ |
+| 금액·상품 | **보내지 않음** (body에 3개 키뿐) | 받지 않음 / 실려 와도 무시 | ✅ PRD 16.8 / 18.1 |
+
+- 라디오 `value`는 `checkout.html:96,101`에서 `MOCK_SUCCESS`/`MOCK_FAILURE` — 서버 상수(`server.js:286-287`)와 **문자열 완전 일치**(대소문자 포함). `"mock_success"`(소문자)를 보내면 서버가 400을 주는 것도 실측 확인했다.
+- 반대 방향 검증: `{"totalPrice":1,"items":[]}`를 body에 **일부러 실어** 보내도 서버 계산 금액(289,000원)으로 주문이 만들어짐을 실측 — 클라이언트 금액을 신뢰하지 않는다(D12).
+
+### 2.2 상태 코드별 — 서버가 반환하는 것 vs 프론트가 분기하는 것 ✅ PASS
+
+`checkout.js:184-208`의 분기와 서버 응답을 1:1로 대조하고, **각 분기를 실브라우저에서 실제로 진입시켰다.**
+
+| 상태 | 서버 실제 응답 (curl 실측) | 프론트 분기 (`checkout.js`) | 실브라우저 결과 | 판정 |
+|---|---|---|---|---|
+| **200** | `{"order":{...9필드...}}` | `:184` `result.body.order.orderId` → `location.href='/order.html?orderId='+...` | 주문 확인 화면 이동, `orderId` 일치 | ✅ |
+| **402** | `{"error":{"message":"결제가 승인되지 않았습니다. 다른 결제 수단으로 다시 시도해 주세요."}}` | `:198` `showSubmitError(message, false)` | 화면 유지 + 서버 문구 그대로 표시 | ✅ |
+| **400** | `{"error":{"message":"주문자 이름을 1자 이상 30자 이하로 입력해 주세요."}}` 등 3종 | `:202` `showSubmitError(message, false)` | 화면 유지 + 서버 문구 표시 | ✅ |
+| **409** | `{"error":{"message":"장바구니가 비어 있어 결제할 수 없습니다."}}` | `:195` `showSubmitError(message, **true**)` → 상품 목록 링크 동반 | 링크 함께 표시 | ✅ 16.14 |
+| **5xx / 네트워크** | (라우트 abort로 재현) | `:205`/`:210` 폴백 문구 | 에러 표시 + 버튼 재활성화 | ✅ 16.20 |
+
+- **메시지 언래핑 지점이 하나뿐**임을 확인: `cart-badge.js:46-51` `readErrorMessage()`가 `body.error.message` 두 겹을 벗기는 유일한 함수이고, `checkout.js:194`가 이를 재사용한다. 프론트가 자체 문구로 덮어쓰지 않고 **서버 문구를 그대로 표시**한다(M1 교훈 준수).
+- **표시 요소는 `checkout-error` 하나**로 5종을 모두 처리(PRD 19.9) — 상태 코드별 선택자를 만들지 않았다. 확인 완료.
+
+### 2.3 402를 프론트가 미리 판정하지 않는가 (PRD 16.9) — ✅ PASS (요청 개수로 단언)
+
+이번 사이클에서 **가장 놓치기 쉬운 경계면**이다. `paymentMethod === 'MOCK_FAILURE'`인지 프론트가 검사해 요청 없이 실패 화면을 그리면, 서버-프론트 경계면이 통째로 미테스트로 남는다.
+
+- **정적 검증:** `checkout.js` 전체에서 `MOCK_FAILURE` 문자열은 **주석(19행)에만** 등장하고, 실행 코드에는 `paymentMethod` 값을 비교하는 조건문이 **0건**이다. `readSelectedPaymentMethod()`는 라디오 `value`를 그대로 읽어 payload에 넣기만 한다.
+- **동적 검증(핵심):** 실브라우저에서 `POST /api/checkout` 요청 개수를 계측했다. `MOCK_FAILURE`를 선택하고 결제 버튼을 눌렀을 때 **요청 개수가 0→1로 증가**했고(누적 2건), 402 응답을 받은 뒤에야 에러가 표시됐다. **요청 없이 실패를 그리는 경로는 존재하지 않는다.**
+- 같은 방식으로 **16.18(프론트 입력 검증 없음)** 도 요청 개수로 단언했다 — 이름·연락처가 **완전히 빈 상태**로 결제 버튼을 눌렀을 때 요청이 **실제로 1건 나갔고** 400 응답의 서버 문구가 표시됐다. `checkout.html`에 `required`/`pattern`/`minlength`/`maxlength`/`type="tel"` **0건**, `<form novalidate>` 확인(`checkout.html:81`).
+
+### 2.4 `order` 응답에 `cartId`가 노출되지 않는가 (PRD 8.6 / D23) — ✅ PASS
+
+- **서버:** `server.js:352-356` `toOrderResponse()`가 `const { cartId, ...publicOrder } = order`로 제거하고, `POST /api/checkout`(`:642`)·`GET /api/orders/:orderId`(`:669`) **두 응답 경로 모두** 이 함수를 통과한다. 우회 경로 없음.
+- **실측:** 두 엔드포인트의 원시 JSON에서 `Object.keys(order)`가 정확히 `orderId,status,ordererName,ordererPhone,paymentMethod,items,totalQuantity,totalPrice,createdAt` **9개**이고 `'cartId' in order === false`.
+- **프론트:** `order.js`/`checkout.js` 어디에도 `cartId` 참조 없음. `public/` 전체에서 `document.cookie`/`localStorage`/`sessionStorage` 사용 **0건**(주석 제외).
+
+### 2.5 장바구니 비우기가 서버 checkout 처리 안에서 일어나는가 (D19 / 18.7) — ✅ PASS
+
+- **서버:** `server.js:637-640` — `orders.set(orderId, order)` 직후 **같은 요청 처리 안에서** `items.length = 0`. 실패 경로(400 `:588-598` / 409 `:605-608` / 402 `:610-614`)는 **모두 이 지점 앞에서 `return`** 하므로 비우기에 도달할 수 없다.
+- **프론트가 `DELETE /api/cart`를 따로 부르지 않는가:** `checkout.js`에 `DELETE`·`clearCart` 호출 **0건**(grep 전수).
+- **실측 (성공):** 결제 200 직후 `GET /api/cart` → `{"cart":{"items":[],"totalQuantity":0,"totalPrice":0}}`. 실브라우저에서도 결제 후 `/cart.html`이 빈 상태로 전환되고 `checkout-link`가 hidden이 됐다.
+- **실측 (실패 시 불변, PRD 16.15):** 402 직후 / 네트워크 오류 직후 / 400 직후 모두 `GET /api/cart`가 **결제 시도 전과 동일**(줄 2개, `totalQuantity=12`, `totalPrice=289000`). 실브라우저에서도 배지가 `12`로 유지되고 별도 탭의 장바구니 총액이 `289,000원` 그대로였다. **낙관적 갱신 코드 0건.**
+- **참조 비공유(18.7 후단):** `buildCartSnapshot()`이 `.map()`으로 매 줄 새 객체를 만들므로 주문 `items`는 복사본이다. **실측으로 확인** — 장바구니가 비워진 뒤 같은 주문을 재조회해도 `items` 2줄·`totalPrice` 289,000이 그대로 남아 있다.
+
+### 2.6 금액 3중 일치 (PRD 17.4 — 이번 사이클 핵심 불변식) — ✅ PASS
+
+할인이 걸린 줄(`p1` 10개, 10% 할인)을 포함한 장바구니로 **장바구니 → 결제 → 주문 확인** 세 화면의 총액 문자열을 대조했다.
+
+```
+장바구니 cart-total-price   = 289,000원
+결제화면 checkout-total-price = 289,000원
+주문확인 order-total-price   = 289,000원      ← 세 값 문자열 완전 일치
+```
+
+- 서버 원시값도 `cart.totalPrice = 289000` == `order.totalPrice = 289000`.
+- 줄 단위 불변식도 실측 확인: `p1` → `price 19000 / quantity 10 / discountApplied true / discountedUnitPrice 17100 / lineSubtotal 190000 / lineTotal 171000 / discountAmount 19000` (12.5 계산식·버림 규칙 일치), `p2` → 미적용 줄이 `discountedUnitPrice === price`, `lineTotal === lineSubtotal`, `discountAmount 0`.
+- **`order.items`의 필드 수 = 11개** — `CartItem`과 완전히 동일(별도 `OrderItem` 타입 없음, 데이터 모델 확정값 준수). 할인 필드 5개가 주문 스냅샷에 그대로 보존된다.
+- **프론트 재계산 0건:** `checkout.js`/`order.js`에 `price *`, `reduce`, `* 0.9`, `/ 100`, `quantity >= 10` 형태의 산술·판정 **주석 외 출현 0건**. 두 화면 모두 `cart-badge.js`의 `mapCartItem()`(산술 없음, `Number()` 변환 + `formatPrice()` 포맷만)을 재사용한다.
+
+## 3. 우선순위 2 — PRD 요구사항별 판정 (15~19장 전수)
+
+### 15장 — 장바구니 → 결제 진입
+
+| # | 요구사항 | 검증 방법 | 판정 |
+|---|---|---|---|
+| 15.1 | "결제하기" 링크, 실제 `<a href="/checkout.html">` | 실브라우저: 클릭 → `/checkout.html` 이동. `cart.html:77`이 `<a>` 태그(JS `location` 조작 아님) | ✅ |
+| 15.2 | 빈 장바구니면 hidden (DOM엔 존재) | `count()===1` **and** `isHidden()===true` (결제 후 빈 상태에서 실측) | ✅ |
+| 15.3 | 진입점은 장바구니 화면 하나뿐 | `index.html`/`product.html`/`app.js`/`product.js`에 `checkout`·`결제`·`바로 구매` **0건** (grep 전수). 공통 헤더(4개 화면)에도 결제 링크 없음 | ✅ |
+| 15.4 | 장바구니 나머지 불변 | 기존 Playwright 44건 통과 + 줄/수량/삭제/합계/빈상태/비우기/할인 표시 회귀 없음 | ✅ |
+| 15.5 | `cart-clear` 위치·동작 불변, 서로 독립 | `cart.js:59,62`가 서로를 참조하지 않는 독립 토글. 결제 링크가 보이는 상태에서 `cart-clear`도 정상 표시 | ✅ |
+
+### 16장 — 결제 화면
+
+| # | 요구사항 | 검증 방법 | 판정 |
+|---|---|---|---|
+| 16.1 | `GET /api/cart` **한 번**, 요약+배지 동시 충족 | 계측: 첫 방문 API 요청 `["GET /api/cart"]` 1건뿐 | ✅ |
+| 16.2 | 읽기 전용 (증감/삭제/비우기 없음, PATCH/DELETE 미호출) | 해당 `data-testid` `count()===0`. `checkout.js`에 PATCH/DELETE/clearCart/setQuantity/removeItem **0건** | ✅ |
+| 16.3 | 장바구니로 돌아가는 링크 | `checkout.html:31` `<a href="/cart.html">` 상시 노출 | ✅ |
+| 16.4 | 금액은 서버 값 그대로 | 장바구니 총액 == 결제 총액 문자열 일치(§2.6). 프론트 산술 0건 | ✅ |
+| 16.5 | 할인 UI 없음 | `cart-item-discounted-price`/`cart-item-discount-notice` `count()===0` (할인 줄 포함 상태에서) | ✅ |
+| 16.6 | 입력란은 이름·연락처 2개뿐 | 주소/우편번호/이메일/요청사항/카드번호/CVC/유효기간/생년월일 **0건** (grep 전수) | ✅ |
+| 16.7 | 라디오 2개, 초기 `MOCK_SUCCESS` 선택, 라벨에 "모의"/"실패 테스트용" | `isChecked(payment-method-success)===true`. 라벨 `모의 결제 (승인 성공)` / `모의 결제 (승인 거절 — 실패 테스트용)` | ✅ |
+| 16.8 | body 3필드, 금액·상품 미포함 | §2.1 | ✅ |
+| 16.9 | 프론트가 402를 미리 판정하지 않음 | **요청 개수 계측으로 단언** (§2.3) | ✅ |
+| 16.10 | 이중 클릭 방지 + 응답 후 재활성화 | 400ms 지연 라우트 + **3연타** → `POST /api/checkout` **1건**. 402/네트워크 오류 후 `isDisabled()===false` | ✅ |
+| 16.11 | 성공 시 `/order.html?orderId=` 이동 | 실브라우저 URL 이동 확인 | ✅ |
+| 16.12 | 402 시 머무름·입력값 유지·요약 유지·재시도 성공 | URL 유지, `홍길동`/`010-1234-5678` 그대로, 총액 동일, 이후 `MOCK_SUCCESS`로 재시도 → 200 | ✅ |
+| 16.13 | 400 시 메시지 표시 + 이동 없음 | 서버 문구 `주문자 이름을 1자 이상...` 표시, URL 유지 | ✅ |
+| 16.14 | 409 시 메시지 + 상품 목록 링크 | 결제 화면 띄운 채 다른 경로로 장바구니를 비우고 결제 → 문구 + `#checkout-error-action` 표시 | ✅ |
+| 16.15 | 실패 시 장바구니 절대 불변 | 400/402/네트워크 3경로 모두 실측 (§2.5) | ✅ |
+| 16.16 | 빈 장바구니 직접 접속 → `checkout-empty`, 폼/라디오/버튼 숨김 | `checkout-empty` 표시, `checkout-submit`/`orderer-name`/`payment-method-success` 모두 `isHidden()` | ✅ |
+| 16.17 | 상태 배타성 (+ 요청 실패는 예외적으로 겹침) | 빈 상태에서 요약 숨김·에러 숨김 / `GET /api/cart` 500 주입 시 요약·폼·빈상태 전부 숨고 에러만 / 402 시엔 요약이 보인 채 에러 겹침 | ✅ |
+| 16.18 | 프론트 입력 검증 없음 (HTML5 속성 포함) | 빈 입력에도 요청 1건 실발생 + `required`/`pattern`/`minlength`/`maxlength` 0건, `novalidate` | ✅ |
+| 16.19 | 공통 헤더 + 배지, 값은 16.1 응답의 `totalQuantity` | 배지 텍스트 `12` == 서버 `totalQuantity` 12 | ✅ |
+| 16.20 | 5xx/네트워크 오류 시 에러 표시, 화면 안 깨짐 | 라우트 abort로 재현 → 에러 표시 + 버튼 재활성화 + 장바구니 불변 | ✅ |
+
+### 17장 — 주문 확인 화면
+
+| # | 요구사항 | 검증 방법 | 판정 |
+|---|---|---|---|
+| 17.1 | `GET /api/orders/{id}` **한 번**, 6종 정보 표시 | 주문번호/상태/일시/주문자/연락처/줄 2개/총 수량·금액 전부 렌더 확인 | ✅ |
+| 17.2 | "결제 완료"의 근거는 `status === "PAID"` | `order.js:50`이 `order.status === 'PAID'`로 분기(하드코딩 아님). 화면 텍스트 `결제 완료` | ✅ |
+| 17.3 | 금액은 서버 값 그대로 | 프론트 산술 0건, `mapLineItem` 재사용 | ✅ |
+| 17.4 | 장바구니 == 결제 == 주문 총액 | 세 값 문자열 일치 (§2.6) | ✅ |
+| 17.5 | 새로고침해도 유지 | F5 후 `order-id` 동일 값 재표시 (서버 재조회) | ✅ |
+| 17.6 | `orderId` 없으면 **API 호출 없이** not-found | `/order.html` 접속 시 `/api/orders/` 요청 **0건** (계측) + not-found 표시 | ✅ |
+| 17.7 | 없는 주문 → not-found + 목록 링크 | `ORD-20260810-ZZZZZZ` → `order-not-found` 표시, 링크 존재 | ✅ |
+| 17.8 | 남의 주문 → not-found (같은 화면) | **별도 브라우저 컨텍스트**로 같은 URL 접속 → `order-not-found` 표시, `order-confirmation` hidden. 서버 404 3경로(없음/남의 것/쿠키 없음) 모두 동일 상태코드·동일 메시지 실측 | ✅ |
+| 17.9 | 목록 링크 + 공통 헤더 | `order.html:31` 백링크, 헤더 `cart-link`+`cart-count` | ✅ |
+| 17.10 | 배지 0 → 숨김, 배지 호출 실패해도 렌더 정상 | 결제 직후 `cart-count` `isHidden()===true`. `refreshBadge()`가 실패를 내부에서 삼킴(`cart-badge.js:189-193`) | ✅ |
+| 17.11 | 상태 배타성 | `showOnly()` 4상태 배타 토글, 각 상태 실진입 확인 | ✅ |
+| 17.12 | 할인 UI 없음 | 할인 선택자 `count()===0` (할인 줄 포함 주문에서) | ✅ |
+| 17.13 | 취소/환불/재주문/영수증/배송조회 버튼 없음 | `order.html` 전체에 해당 버튼 0건 | ✅ |
+
+### 18장 — API (실서버 curl 전수)
+
+| # | 요구사항 | curl 실측 | 판정 |
+|---|---|---|---|
+| 18.1 | body 3필드만, 금액·상품 무시 | `{"totalPrice":1,"items":[]}` 동봉해도 서버 계산값(289,000)으로 주문 생성 | ✅ |
+| 18.2 | 200 + `{ "order": {...} }` 래핑, 9필드 | `Object.keys` 정확히 9개, top-level 래핑 확인 | ✅ |
+| 18.3 | 결정론적 판정, 난수·시각·금액 미사용 | `MOCK_FAILURE` **5회 연속 → 402/402/402/402/402**. `server.js:610`이 문자열 비교 한 줄. 판정부에 `Math.random()`/`Date` 없음(`crypto.randomInt`는 `orderId` 접미사 전용으로 판정과 분리됨) | ✅ |
+| 18.4 | 402 + 지정 문구, 주문 미저장·장바구니 미변경 | 문구 일치. 402 후 `GET /api/cart` 불변. `orderId` 미발급 | ✅ |
+| 18.5 | 400 3종 + 정규식 확정값 | 이름: 빈문자/공백만/**31자** → 400, **30자 경계 → 통과**. 연락처 **허용 4종 전부 통과 / 불허 6종 전부 400**(`010-1234-567`, `02-123-4567`, `010-12345678`, `010 1234 5678`, `abc`, 공백만). `paymentMethod`: `CARD`/`mock_success`/`null`/`""` → 400 | ✅ |
+| 18.5 | **검증 순서 400 → 409 → 402** | 이름 빈값 + `MOCK_FAILURE` → **400**(402 아님). 빈 장바구니 + 잘못된 이름 → 400 | ✅ |
+| 18.6 | 빈 장바구니 → 409 + 지정 문구 | 문구 일치 | ✅ |
+| 18.7 | 한 요청 안에서 저장+비우기, `items` 복사본 | 결제 직후 장바구니 비었으나 주문 재조회 시 `items` 2줄 유지 | ✅ |
+| 18.8 | 재고 미차감, `Product`에 재고 필드 없음 | `GET /api/products` 응답 5필드 그대로(1차 회귀) | ✅ |
+| 18.9 | 200 + `POST /api/checkout`과 동일 shape | 두 응답 키 집합 동일 | ✅ |
+| 18.10 | 404 3경로를 동일하게 처리 | 없는 주문 / 다른 쿠키 / 쿠키 없음 → 전부 `404` + `주문을 찾을 수 없습니다.` (403 아님) | ✅ |
+| 18.11 | `GET /api/orders`(복수형) 없음 | → `404 존재하지 않는 API 경로입니다.` | ✅ |
+| 18.12 | 500 문구 분기 | §1 (코드 확인) | ✅ |
+| 18.13 | 총 9개, PG·목록·취소·환불·쿠폰 미구현 | 라우트 9개 확인, PG 관련 식별자 grep **0건**(`tosspayments`/`iamport`/`portone`/`inicis`/`nicepay`/`paypal`/`stripe`/`webhook`/`returnUrl`/`successUrl`/`failUrl`) | ✅ |
+| 18.14 | 에러 shape 불변, `code` 미추가 | 400/402/404/409 전부 `{ error: { message } }` 한 겹만 | ✅ |
+| 18.15 | 쿠키 규칙 동일, 쿠키 없는 checkout → 409 | `Set-Cookie: cartId=...; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800` (Secure 없음) + 409 동시 확인 | ✅ |
+| 18.16 | 비멱등 — 연속 2회 시 두 번째는 409 | 200 → 409 실측 | ✅ |
+
+### `Order` 데이터 모델 불변식 (실측)
+
+| 불변식 | 실측 | 판정 |
+|---|---|---|
+| `status === "PAID"` | `PAID` | ✅ |
+| `orderId` ~ `^ORD-\d{8}-[A-Z0-9]{6}$` | `ORD-20260810-AAYRCI`, `ORD-20260810-2ECAH1` — 정규식 통과, 날짜부 UTC 기준 일치 | ✅ |
+| `items.length >= 1` | 2 | ✅ |
+| `totalQuantity` == `quantity` 합 | 12 == 10+2 | ✅ |
+| `totalPrice` == `lineTotal` 합 (`lineSubtotal` 합 아님) | 289000 == 171000+118000 (308000 아님) | ✅ |
+| `totalPrice` == 결제 직전 장바구니 `totalPrice` | 289000 == 289000 | ✅ |
+| `ordererName`/`ordererPhone` trim만 적용, 형식 재조립 없음 | `"  홍길동  "` → `"홍길동"`, `"  010-1234-5678  "` → `"010-1234-5678"`(하이픈 보존) | ✅ |
+| `createdAt` ISO 8601 UTC | `2026-08-10T04:24:01.883Z` | ✅ |
+| 결제 직후 `GET /api/cart`는 빈 장바구니 | 확인 | ✅ |
+| 모든 금액 정수 | 소수 0건 | ✅ |
+
+### 19장 — 테스트 선택자 (전수 대조)
+
+- **4차 신규 선택자 28종이 전부 존재하며, PRD에 없는 선택자는 하나도 추가되지 않았다.** `checkout.html`/`checkout.js`에서 추출한 `data-testid` 17종(공통 헤더 2종 포함), `order.html`/`order.js`에서 18종 — PRD 19.1~19.17 목록과 1:1 일치.
+- `data-product-id`: `checkout-item`(19.3)·`order-item`(19.14) 양쪽에 부여 확인.
+- 19.13 `<time datetime>`: 속성값이 `2026-08-10T...Z` ISO 원본, 표시 텍스트는 `toLocaleString('ko-KR')` — 단언은 속성으로 가능.
+- 19.11 `data-order-id`: 렌더 후 값이 `order-id` 텍스트와 일치.
+- 19.18 존재/부재 규칙: §1의 M2 표.
+- 19.19 기존 선택자 불변: 기존 Playwright 44건 통과가 증거.
+
+### 최상단 제약 블록 (모의 결제 — 만들지 않는 것) — ✅ 전항목 미구현 확인
+
+`public/` + `server.js` grep 전수에서 **PG SDK·스크립트 로드 0건 / 카드번호·유효기간·CVC·생년월일·카드사 선택 입력란 0건 / 결제창 팝업·리다이렉트·`returnUrl`·`successUrl`·`failUrl` 0건 / 웹훅 엔드포인트 0건 / 가맹점 ID·시크릿 키·`.env` 결제 설정 0건 / 취소·환불·영수증 0건.** 결제는 `fetch` 한 번으로 끝난다.
+
+## 4. 우선순위 3 — 코드 품질
+
+- **중복 없음.** `order.js`가 자체 매핑 함수를 만들지 않고 `HaruCart.mapLineItem`(= `mapCartItem`)을 재사용한다. `checkout.js`는 `HaruCart.getCart()`를 그대로 쓴다 — 응답 언래핑 지점이 프로젝트 전체에서 `mapCartResponse()`/`mapOrderResponse()`/`readErrorMessage()` 3곳으로 유지된다.
+- **미사용 코드 없음.** `checkout.js`/`order.js`의 선언 요소가 전부 사용된다. `hideSubmitError()`도 `onSubmit` 진입 시 사용.
+- **명명 규칙 일관.** 서버 필드 camelCase / enum UPPER_SNAKE_CASE(`PAID`, `MOCK_SUCCESS`) 확정값 준수. `paymentMethod` 상수 2개가 서버 한 곳(`server.js:286-287`)에만 있고 검증·판정이 모두 이를 참조 → 문자열 드리프트 여지 없음.
+- **375px 레이아웃:** `checkout.html`·`order.html` 모두 `scrollWidth === 375`로 가로 오버플로 없음 (frontend-agent가 미확인으로 남긴 항목 — QA가 실측 보완).
+- **주석 품질:** 두 신규 프론트 파일 모두 상단에 백엔드 계약과 PRD 조항 번호가 명시돼 있어 다음 사이클에 계약이 바뀔 때 고칠 지점이 명확하다.
+
+## 5. 발견 사항
+
+### [Minor] M8 — `order.js`의 페이지 로드 병렬 2호출에서 M4 메커니즘(cartId 이중 발급)이 실측 재현됨
+
+- **위치:** `public/order.js:176` `loadOrder()` (→ `GET /api/orders/:orderId`) + `public/order.js:187` `window.HaruCart.refreshBadge()` (→ `GET /api/cart`) — 둘이 **같은 tick에 병렬로 나간다.** 서버 측 지점은 `server.js:164-176` `ensureCartId()`(2차 이후 변경 없음).
+- **문제:** 쿠키가 없는 첫 방문에서 두 요청이 **각각** "쿠키 없음"으로 판단해 **서로 다른 `cartId`를 2개 발급**한다. 실측:
+
+  ```
+  Set-Cookie (from /api/orders/...) : cartId=46fe83ac-6c6f-4c59-9272-6356602e06aa
+  Set-Cookie (from /api/cart)       : cartId=8b96d987-407a-4d40-99e9-5a872b3322fe
+  브라우저 최종 보관                : cartId=8b96d987-...   ← 하나만 남음
+  ```
+
+  이는 `docs/bug-history/2026-08-08_cart-session-race-condition.md`의 **"왜 다시 터질 수 있는가"** 에 적힌 재발 조건 *"화면이 로드되자마자 2개 이상의 API 요청을 병렬로 쏘는 상황"* 을 **문자 그대로 충족**한다. frontend-agent의 자체 보고("M4 패턴이 아니다")는 **결론(영향 없음)은 맞지만 근거(구조가 다르다)는 부정확하다** — 구조는 동일하고, 결과가 갈리지 않을 뿐이다.
+- **왜 Critical/Important가 아닌가 (관찰 가능한 결함이 없는 이유):**
+  1. 이 화면에 도달하는 정상 경로(결제 성공 직후 `location.href` 이동)에서는 **쿠키가 이미 존재**하므로 이중 발급 자체가 일어나지 않는다.
+  2. 쿠키가 없는 상태로 주문 URL을 여는 경우(시크릿 창에 링크 붙여넣기)는 **어느 `cartId`가 살아남든 `GET /api/orders/:orderId`가 반드시 404**다 — 새로 발급된 UUID가 기존 주문의 `cartId`와 일치할 수 없기 때문. 즉 PRD 17.8이 요구하는 결과와 **항상 같다.** 실측으로도 not-found가 결정론적으로 재현됐다.
+  3. 배지는 어느 쪽 `cartId`로 조회해도 **빈 장바구니(0)** → 숨김. PRD 17.10 결과와 동일.
+  4. 이 화면은 장바구니를 **읽기만** 하고 쓰지 않는다.
+- **⚠️ 언제 실결함이 되는가 (다음 사이클 경고):** 아래 중 **하나라도** 생기면 즉시 재발한다.
+  - 주문 확인 화면에 "다시 담기 / 재주문"처럼 **장바구니를 쓰는 조작**이 추가될 때 (담은 결과가 살아남지 못한 쪽 `cartId`에 들어가 사라진다)
+  - `GET /api/orders`(목록)가 범위에 들어와 **`cartId` 기반으로 목록을 조회**할 때
+  - 로그인/세션 확인처럼 **또 다른 쿠키 기반 병렬 호출**이 어느 화면에든 추가될 때
+- **수정 방향 (택1, 이번 사이클 필수 아님):**
+  1. **(권장·근본)** bug-history가 이미 제시한 1안 — **정적 HTML을 서빙하는 시점에 쿠키를 선발급**한다. `express.static` 앞에 `.html` 응답에 대해 `ensureCartId(req, res)`를 호출하는 미들웨어를 한 개 두면, 첫 API 요청이 도착하기 전에 쿠키가 이미 존재하므로 **`order.js`/`checkout.js`/`product.js` 어느 프론트 코드도 고치지 않고** 프로젝트 전체의 M4가 한 번에 사라진다. (3차 리포트 I7이 지목한 것과 같은 처방)
+  2. (국소) `order.js`에서 `refreshBadge()`를 `loadOrder()`의 응답 이후로 **직렬화**한다 — 이 화면 하나만 막는 대증 요법이라 다음 화면에서 또 판단해야 한다.
+- **양쪽 통보 필요:** backend-agent(1안 담당) / frontend-agent(2안 담당) — 어느 쪽을 택하든 한쪽만 고치고 반대편에 안 알리면 서로 다른 가정으로 각자 수정하게 된다.
+
+### [정보성] I8 — `checkout-error` 요소가 두 가지 의미를 겸용한다
+
+- **위치:** `public/checkout.js:54-71` `showPhase()` / `showSubmitError()`
+- `checkout-error`가 ① **"화면 전체 에러 상태"**(초기 `GET /api/cart` 실패 → 요약·폼 숨기고 단독 표시)와 ② **"정상 화면 위의 요청 실패 오버레이"**(400/402/409/5xx → 요약·폼 유지) 두 의미로 쓰인다.
+- **스펙 위반이 아니다.** PRD 19.10은 상태 요소로 `checkout-loading`·`checkout-empty` 두 개만 정의했고 "화면 전체 에러 상태"용 선택자를 따로 주지 않았다(16.17 각주가 그 상태의 존재만 언급). 주어진 선택자 안에서의 합리적 구현이다.
+- **테스트 작성 시 주의:** `checkout-error`가 보인다는 사실만으로 두 상황을 구분할 수 없다. **`checkout-summary`(또는 `checkout-submit`)가 함께 보이는지**를 같이 단언해야 한다 — 본 리포트의 16.17 검증도 그 방식으로 했고, 2단계 자동화도 같은 방식으로 짜야 한다.
+
+### [정보성] I9 — `orders` Map이 단조 증가한다 (I3의 연장)
+
+- **위치:** `server.js:137` `const orders = new Map()`
+- 2차 I3(`carts` Map 단조 증가)와 같은 성질이다. 주문은 만료·삭제 경로가 없어 프로세스 수명 동안 계속 쌓인다. **이번 범위에서는 결함이 아니다** — D21이 "서버 재시작 시 주문이 사라져도 된다"고 확정했고 DB 도입 사이클에 함께 정리될 사안이다.
+- 부수 기록: M8의 이중 발급으로 생기는 여분 `cartId`는 `GET /api/orders`가 `getCartItems()`를 호출하지 않으므로 **`carts` Map에 항목을 만들지 않는다** — 메모리 누적 관점의 추가 부담은 없다.
+
+## 6. 회귀 테스트 자산 조치 (2단계 필수 작업)
+
+### [T1] `tests/e2e/cart.spec.js:498` — "장바구니 화면에는 결제/주문 버튼이 없다 (7.10)" 가 **실패한다**
+
+```
+$ npx playwright test
+  1 failed
+    [chromium] › tests/e2e/cart.spec.js:498:3 › ... › 장바구니 화면에는 결제/주문 버튼이 없다 (7.10)
+  44 passed (13.4s)
+```
+
+- **원인:** 이 테스트는 3차 시점의 PRD **7.10**("장바구니 화면에 결제/주문 버튼을 만들지 않는다")을 지키던 회귀 테스트다. 4차에서 **7.10은 폐기되고 15.1로 대체**되어 결제하기 링크가 정상적으로 생겼다. 실패 지점은 `cart.spec.js:504` `page.locator('a', { hasText: /결제|주문|구매|checkout/i })`가 `toHaveCount(0)`을 기대하는데 실제로는 `1`(= `checkout-link`)이다.
+- **제품 결함이 아니다.** 실패가 곧 15.1이 구현됐다는 증거다. 서버·프론트 코드를 고칠 사안이 아니다.
+- **왜 방치하면 안 되는가:** 이 스위트는 매 사이클 회귀를 잡아주는 유일한 자동 장치다. 항상 1건이 빨간불이면 **"원래 하나는 실패한다"는 습관**이 생겨 진짜 회귀를 놓치게 된다.
+- **2단계 조치(승인 후 sonnet 호출에서 수행):** `cart.spec.js:498-506` 블록을 **삭제가 아니라 교체**한다 —
+  1. 7.10 케이스는 제거하고,
+  2. 같은 자리에 **15.1~15.5**(결제하기 링크 존재·`<a href>`·항목 있을 때 표시·빈 장바구니에서 hidden·`cart-clear`와 독립) 케이스를 넣는다.
+  3. **6.12는 그대로 유지**한다 — 상품 상세 화면의 결제/구매 버튼 금지는 4차에도 유효하므로(15.3), `product-detail.spec.js`의 6.12 테스트는 손대지 않는다.
+- 나머지 **44건은 전부 통과** — 1~3차 회귀 없음(목록/상세/장바구니/세션/비우기/할인 전 영역).
+
+## 7. 미검증 항목 (한계 고지)
+
+| 항목 | 사유 | 위험도 |
+|---|---|---|
+| `/api/checkout`·`/api/orders`의 **500 분기 런타임 트리거** | 두 라우트에 `?simulate=error` 같은 강제 오류 훅이 없어 실행으로 500을 만들 수 없었다. **코드 리딩 + 경로 대조로 판정**(§1) | 낮음 — 분기 조건이 문자열 비교뿐이고 라우트 경로가 확정적 |
+| 실제 동시성 하의 M4 재현(같은 밀리초 도착) | 로컬 환경은 창이 좁다. 대신 **`Set-Cookie` 발급 횟수·값**으로 메커니즘을 직접 관측했다(M8) | 낮음 — 메커니즘 자체는 확인됨 |
+| 다중 브라우저 엔진(Firefox/WebKit) | `playwright.config.js`가 chromium 단일 프로젝트 | 낮음 — `toLocaleString`/`<time>`은 표준 API |
+| 서버 재시작 후 주문 소실 | D21/8.7이 허용한 동작이므로 검증 대상에서 제외 | 해당 없음 |
+| 장기 부하 / 다수 주문 누적 시 성능 | 범위 밖 (I9) | 해당 없음 |
+
+## 8. 양쪽 에이전트에게 전달할 사항 (4차)
+
+**backend-agent에게**
+1. **M5 대응 잘 됐다.** `/api/checkout`·`/api/orders` 분기가 실재하고 문구가 18.12 권장값과 일치한다. 기존 두 분기와 shape·상태 코드를 건드리지 않아 회귀도 없다.
+2. **M8 근본 수정의 담당은 백엔드 쪽이 더 유리하다.** 정적 HTML 서빙 시점 쿠키 선발급(미들웨어 1개)이면 프론트 3개 파일을 손대지 않고 프로젝트 전체의 M4가 사라진다. 기획 승인 후 다음 사이클 초반에 처리 권장.
+3. 다음 사이클에 500 경로를 QA가 실행 검증할 수 있도록, `?simulate=error` 훅을 `/api/checkout`·`/api/orders`에도 열어줄지 product-planner와 논의해 달라(현재는 코드 리딩으로만 판정 가능).
+
+**frontend-agent에게**
+1. `checkout.js`의 **단일 `GET /api/cart`** 결정은 정확했다 — 계측으로 요청 1건임을 확인했다. 16.9(프론트 미리 판정 금지)도 실행 코드에 비교문 0건으로 완벽히 지켜졌다.
+2. **`order.js`의 M4 판단 근거만 정정이 필요하다.** 결론("이번 사이클 영향 없음")은 맞지만 근거("구조가 다르다")는 사실과 다르다 — 구조는 동일하고 **cartId가 실제로 2개 발급된다**(M8 실측). 다음 사이클에 이 화면이 장바구니를 **쓰기** 시작하면 그 순간 실결함이 된다는 점을 인지해 달라.
+3. `03_frontend_screens.md` 29절의 **미확인 5건은 QA가 전부 실측 보완했다** — 이중 클릭(3연타 → POST 1건), 402 재시도 폼 상태 유지, `checkout-empty`/초기 로드 실패 상태, `<time datetime>` 속성, 375px 레이아웃(오버플로 없음). 모두 통과.
+4. `checkout-error` 겸용(I8)은 스펙 위반은 아니나, 자동화 테스트에서 두 상황을 구분하려면 `checkout-summary` 표시 여부를 함께 봐야 한다.
+
+**product-planner에게**
+1. 15~19장은 **구현 가능하고 검증 가능한 형태로 잘 확정돼 있었다.** 특히 D17(결정론적 판정)·D25(서버 단독 검증)·19.18(존재/부재 규칙) 세 결정이 QA 케이스를 유한하고 재현 가능하게 만들었다.
+2. **T1**은 요구사항 폐기(7.10 → 15.1)가 회귀 테스트를 무효화한 사례다. 앞으로 요구사항을 폐기할 때 "그 요구사항을 지키던 테스트도 함께 폐기 대상"임을 개정 표에 한 줄 적어주면 QA가 놓치지 않는다.
+
+## 변경 이력 (누적)
+
+| 날짜 | 변경 내용 |
+|---|---|
+| 2026-08-10 | **4차 사이클 검증 추가 (모의 결제)** — 우선순위 0의 **bug-history 재발 검증을 먼저 수행**: **M5 재발 없음**(공용 500 핸들러에 `/api/checkout`·`/api/orders` 분기 실재를 코드로 확인), **M4 — 결제 화면 재발 없음**(첫 방문 API 요청 1건 계측)이나 **주문 확인 화면에서 메커니즘 재현**(`Set-Cookie` 2회·서로 다른 cartId 실측 → M8, 이번 사이클 영향 없음), **M2 준수**(존재/부재 분리 단언). PRD 15.1~15.5 / 16.1~16.20 / 17.1~17.13 / 18.1~18.16 / 19.1~19.19 + `Order` 불변식 10종 전수. 실서버 curl 40여 케이스(연락처 허용 4·불허 6, 이름 30/31자 경계, 검증 순서 400→409→402, 결정론 5연속, 404 3경로, 비멱등 200→409) + **Chromium 실브라우저 단언 48건 전원 통과** + 375px 레이아웃 2건. 금액 3중 일치(장바구니 289,000원 == 결제 == 주문) 확인. Critical 0 / Important 0 / **Minor 1(M8)** + 정보성 2(I8, I9) + **회귀 테스트 자산 조치 1건(T1 — `cart.spec.js`의 7.10 테스트가 15.1 구현으로 실패, 제품 결함 아님, 2단계에서 교체 필요)** |

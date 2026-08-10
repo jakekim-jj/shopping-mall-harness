@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>하루상점 — 주문 확인</title>
+  <meta name="description" content="하루상점 주문 확인 화면입니다.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div class="mark">
+        <a class="mark__home" href="/">
+          <span class="mark__latin">HARU STORE</span>
+        </a>
+        <span class="mark__ko">하루상점 · 매일 쓰는 것들</span>
+      </div>
+      <div class="masthead__aside">
+        <a class="cart-link" data-testid="cart-link" href="/cart.html">
+          <span class="cart-link__label">장바구니</span>
+          <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shelf">
+    <h1 class="shelf__title">주문 확인</h1>
+    <!-- 상품 목록으로 돌아가는 링크 (PRD 17.9). 상태 요소가 아니라 항상 보인다. -->
+    <p class="backlink"><a href="/">← 판매 중인 상품</a></p>
+
+    <!-- 상태 영역: order-loading / order-confirmation / order-not-found / order-error 중
+         항상 하나만 보인다 (PRD 17.11). 존재하지 않는 주문과 남의 주문은 서버가 이미
+         같은 404로 합쳐서 내려주므로, 프론트도 둘 다 order-not-found 하나로 처리한다
+         (PRD 17.7 / 17.8 / D23) — "권한 없음" 전용 화면을 따로 만들지 않는다. -->
+    <div class="cart-skeleton" data-testid="order-loading" id="order-loading" aria-live="polite" aria-busy="true">
+      <span class="sr-only">주문 정보를 불러오는 중입니다.</span>
+      <span class="skeleton__line skeleton__line--desc" aria-hidden="true"></span>
+      <span class="skeleton__line skeleton__line--desc" aria-hidden="true"></span>
+    </div>
+
+    <div class="notice" data-testid="order-not-found" id="order-not-found" hidden>
+      <p class="notice__title">주문을 찾을 수 없습니다</p>
+      <p class="notice__body">주소가 잘못되었거나 이 브라우저에서 만든 주문이 아닙니다.</p>
+      <p class="notice__action"><a href="/">상품 목록으로 돌아가기</a></p>
+    </div>
+
+    <div class="notice notice--error" data-testid="order-error" id="order-error" hidden role="alert">
+      <p class="notice__title">주문 정보를 불러오지 못했습니다</p>
+      <p class="notice__body">잠시 후 페이지를 새로고침해 주세요.</p>
+      <p class="notice__action"><a href="/">상품 목록으로 돌아가기</a></p>
+    </div>
+
+    <!-- 주문 확인 — 취소/환불/재주문/영수증/배송조회 버튼은 만들지 않는다 (PRD 17.13). -->
+    <section class="order-confirmation" data-testid="order-confirmation" id="order-confirmation"
+              data-order-id="" hidden>
+      <div class="order-meta">
+        <p><span class="label">주문번호</span><span data-testid="order-id" id="order-id"></span></p>
+        <p><span class="label">결제 상태</span><span data-testid="order-status" id="order-status"></span></p>
+        <p><span class="label">주문 일시</span>
+          <!-- datetime 속성에 응답의 createdAt(ISO 8601) 원본을 그대로 담는다 — qa-agent는 이 속성으로
+               단언한다. 화면에 보이는 텍스트 표기 형식은 frontend-agent 재량이다 (PRD 19.13). -->
+          <time data-testid="order-created-at" id="order-created-at" datetime=""></time>
+        </p>
+        <p><span class="label">주문자</span><span data-testid="order-orderer-name" id="order-orderer-name"></span></p>
+        <p><span class="label">연락처</span><span data-testid="order-orderer-phone" id="order-orderer-phone"></span></p>
+      </div>
+
+      <ul class="summary-lines" data-testid="order-list" id="order-list"></ul>
+
+      <div class="summary">
+        <p class="summary__row">
+          <span class="summary__label">총 수량</span>
+          <span class="summary__leader" aria-hidden="true"></span>
+          <span class="summary__value" data-testid="order-total-quantity" id="order-total-quantity">0</span>
+        </p>
+        <p class="summary__row summary__row--total">
+          <span class="summary__label">총 금액</span>
+          <span class="summary__leader" aria-hidden="true"></span>
+          <span class="summary__value" data-testid="order-total-price" id="order-total-price">0원</span>
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>하루상점 — 주문 확인 화면</p>
+  </footer>
+
+  <script src="/cart-badge.js"></script>
+  <script src="/order.js"></script>
+</body>
+</html>

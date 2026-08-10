@@ -70,6 +70,11 @@
         <span class="summary__value" data-testid="cart-total-price" id="cart-total-price">0원</span>
       </p>
     </div>
+
+    <!-- 결제 진입점은 장바구니 화면에만 둔다 (PRD 15.3 — 상품 상세/목록/헤더에는 만들지 않음).
+         항목이 0개일 때도 요소는 DOM에 남기고 hidden 처리만 한다 (PRD 15.2 / 19.1, cart-clear와 같은 규칙).
+         cart-clear(비우기)와는 완전히 독립된 요소이며 서로의 위치·동작에 영향을 주지 않는다 (PRD 15.5). -->
+    <a class="btn btn--primary cart-checkout" data-testid="checkout-link" id="cart-checkout-link" href="/checkout.html" hidden>결제하기</a>
   </main>
 
   <footer class="footer">

@@ -734,3 +734,164 @@ body {
   .line__total { grid-column: 2; text-align: left; }
   .summary { max-width: none; }
 }
+
+/* =======================================================================
+   4차 사이클 추가 (2026-08-10) — 결제(/checkout.html) / 주문 확인(/order.html)
+   위쪽 규칙은 그대로 두고 아래에만 덧붙인다. 결제하기 링크(.cart-checkout)는
+   장바구니 화면(.btn / .btn--primary)의 기존 클래스를 재사용한다.
+   ======================================================================= */
+
+/* ---------- 장바구니 화면 — 결제 진입 버튼 (PRD 15.1) ---------- */
+
+.cart-checkout {
+  display: block;
+  margin: 16px 0 0;
+  text-align: center;
+  text-decoration: none;
+}
+
+/* ---------- 결제/주문 확인 공용 — 읽기 전용 줄 목록 ---------- */
+/* 상품 이미지·수량 증감·삭제가 없는 "표시 전용" 줄이다 (PRD 16.2 / 17.1).
+   .lines/.line(장바구니, 조작 가능)과는 의도적으로 다른 마크업/클래스를 쓴다. */
+
+.summary-lines {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.summary-line {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.summary-line__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.summary-line__qty {
+  flex: 0 0 auto;
+  font-family: var(--font-num);
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.summary-line__qty::before { content: "× "; }
+
+.summary-line__total {
+  flex: 0 0 auto;
+  min-width: 90px;
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- 결제 화면 — 요약 컨테이너 ---------- */
+
+.checkout-summary { margin: 0 0 30px; }
+
+/* ---------- 결제 화면 — 입력 폼 ---------- */
+
+.checkout-form { max-width: 420px; }
+
+.field { margin: 0 0 18px; }
+
+.field__label {
+  display: block;
+  margin: 0 0 7px;
+  font-size: 12.5px;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.field__input {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.field__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.payment-method {
+  margin: 0 0 24px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+}
+
+.payment-method__option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+/* ---------- 결제 요청 실패 안내 (PRD 16.12~16.14 / 16.20 — checkout-error 단일 요소) ---------- */
+
+.alert {
+  margin: 0 0 24px;
+  padding: 15px 18px;
+  border: 1px solid var(--warn);
+  background: var(--card);
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.alert__message {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.alert__action {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+}
+
+.alert__action a { color: var(--accent); }
+
+/* ---------- 주문 확인 화면 — 메타 정보 ---------- */
+
+.order-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 28px;
+}
+
+.order-meta p { margin: 0; font-size: 14px; }
+
+.order-meta .label {
+  display: inline-block;
+  min-width: 84px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+@media (max-width: 520px) {
+  .summary-line { flex-wrap: wrap; }
+  .summary-line__total { margin-left: auto; }
+}

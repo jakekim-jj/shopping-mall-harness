@@ -495,14 +495,71 @@ test.describe('장바구니 전체 비우기 (PRD 11.1~11.5, 13.2)', () => {
     await expect(page.getByTestId('cart-clear')).toHaveCount(0);
   });
 
-  test('장바구니 화면에는 결제/주문 버튼이 없다 (7.10)', async () => {
-    await seed(page, 'p1', 1);
-    await page.goto('/cart.html');
-    await expect(page.getByTestId('cart-item')).toHaveCount(1);
+});
 
-    await expect(page.locator('button', { hasText: /결제|주문|구매|checkout/i })).toHaveCount(0);
-    await expect(page.locator('a', { hasText: /결제|주문|구매|checkout/i })).toHaveCount(0);
+// ⚠ 4차 개정 — 여기 있던 "장바구니 화면에는 결제/주문 버튼이 없다 (7.10)" 테스트는 폐기되었다.
+// 4차에서 PRD 7.10이 15.1로 대체되어 "결제하기" 링크가 정상적으로 생겼기 때문이다
+// (test-cases.ko.md "4차 사이클에서 폐기된 기존 케이스" 참고). 아래 15.x 블록으로 교체한다.
+test.describe('장바구니 → 결제 진입 (PRD 15.1~15.5, 19.18)', () => {
+  test('담긴 상품이 있으면 결제하기 링크가 보이고, 진짜 링크라서 누르면 이동하고 뒤로가기도 정상 동작한다 (15.1)', async () => {
+    await seed(page, 'p1', 2);
+    await page.goto('/cart.html');
+
+    const link = page.getByTestId('checkout-link');
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute('href', '/checkout.html');
+    // JS 버튼이 아니라 진짜 <a> 링크다 — 새 탭·뒤로가기 등 브라우저 기본 동작이 그대로 통한다
+    expect(await link.evaluate((el) => el.tagName)).toBe('A');
+
+    await link.click();
+    await expect(page).toHaveURL(/\/checkout\.html$/);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/cart\.html$/);
+    await expect(page.getByTestId('cart-item')).toHaveCount(1);
+  });
+
+  test('장바구니가 비어 있으면 결제하기 링크는 DOM에는 남고 화면에서만 숨겨진다 (15.2/19.18)', async () => {
+    await page.goto('/cart.html');
+    await expect(page.getByTestId('cart-empty')).toBeVisible();
+
+    await expect(page.getByTestId('checkout-link')).toHaveCount(1);
+    await expect(page.getByTestId('checkout-link')).toBeHidden();
+
+    await seed(page, 'p1', 1);
+    await page.reload();
+    await expect(page.getByTestId('checkout-link')).toBeVisible();
+  });
+
+  test('결제하기 링크가 생겨도 비우기 버튼은 그대로 있고, 결제하기를 눌러도 장바구니가 비워지지 않는다 (15.5)', async () => {
+    await seed(page, 'p1', 2);
+    await page.goto('/cart.html');
+
+    await expect(page.getByTestId('cart-clear')).toBeVisible();
+    await expect(page.getByTestId('checkout-link')).toBeVisible();
+
+    await page.getByTestId('checkout-link').click();
+    await expect(page).toHaveURL(/\/checkout\.html$/);
+
+    // 결제를 완료한 게 아니라 그냥 이동만 했을 뿐이므로 서버 장바구니는 그대로다
+    const cart = await serverCart(page);
+    expect(cart.items).toHaveLength(1);
+    expect(cart.items[0]).toMatchObject({ productId: 'p1', quantity: 2 });
+  });
+
+  test('결제 화면으로 들어가는 입구는 장바구니 화면 하나뿐이다 — 목록·상세·헤더 어디에도 없다 (15.3)', async () => {
+    await page.goto('/');
     await expect(page.locator('[data-testid*="checkout"]')).toHaveCount(0);
+    await expect(page.locator('a,button', { hasText: /결제|바로\s*구매/i })).toHaveCount(0);
+
+    await page.goto('/product.html?id=p1');
+    await expect(page.getByTestId('product-detail')).toBeVisible();
+    await expect(page.locator('[data-testid*="checkout"]')).toHaveCount(0);
+    await expect(page.locator('a,button', { hasText: /결제|바로\s*구매/i })).toHaveCount(0);
+
+    // 결제 진입점(checkout-link)은 장바구니 화면에만 존재한다
+    await page.goto('/cart.html');
+    await expect(page.getByTestId('checkout-link')).toHaveCount(1);
   });
 });
 

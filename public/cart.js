@@ -37,6 +37,7 @@
     retry: document.getElementById('cart-retry'),
     list: document.getElementById('cart-list'),
     clear: document.getElementById('cart-clear'),
+    checkoutLink: document.getElementById('cart-checkout-link'),
     summary: document.getElementById('cart-summary'),
     totalQuantity: document.getElementById('cart-total-quantity'),
     totalPrice: document.getElementById('cart-total-price')
@@ -56,6 +57,9 @@
     // 비우기 버튼도 담긴 항목이 있을 때만 보인다. 요소는 지우지 않고 hidden만 토글한다
     // (PRD 11.5 / 14.1 — cart-count와 같은 규칙. styles.css의 [hidden]{display:none!important}가 이를 보장한다)
     el.clear.hidden = name !== 'list';
+    // 결제하기 링크도 같은 조건(항목 1개 이상)일 때만 보인다 (PRD 15.2 / 19.1).
+    // cart-clear와 조건이 같을 뿐 서로를 참조하지 않는 독립 토글이다 (PRD 15.5).
+    el.checkoutLink.hidden = name !== 'list';
     el.loading.setAttribute('aria-busy', String(name === 'loading'));
   }
 
