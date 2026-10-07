@@ -1,13 +1,26 @@
-# 백엔드 API 스펙 — 상품 목록 / 상품 상세 / 장바구니 / 모의 결제
+# 백엔드 API 스펙 — 상품 목록 / 상품 상세 / 장바구니 / 모의 결제 / 회원가입·로그인
 
 > 작성: backend-agent / 2026-08-05 (1차: 상품 목록)
 > 개정: backend-agent / 2026-08-08 (2차: 상품 상세 + 장바구니 5개 엔드포인트 추가)
 > 개정: backend-agent / 2026-08-09 (**3차: `DELETE /api/cart` 전체 비우기 + 수량 기반 자동 할인**)
 > 개정: backend-agent / 2026-08-10 (**4차: `POST /api/checkout` 모의 결제 + `GET /api/orders/:orderId` 주문 조회**)
+> 개정: backend-agent / 2026-10-06 (**5차: `/api/auth/*` 회원가입·로그인·로그아웃·상태조회 4개 엔드포인트 추가**)
 > 입력: `_workspace/01_planner_prd.md`
 > **이 문서는 frontend-agent가 그대로 믿고 코딩해도 되는 계약(contract)이다.**
 > 여기 적힌 필드명·래핑·상태 코드는 실제 구동 중인 서버에서 curl로 검증된 값이다.
 > 백엔드가 shape을 바꿔야 할 사정이 생기면, 코드를 고치기 전에 이 문서를 먼저 고치고 frontend-agent에게 알린다.
+
+---
+
+## 🚨 5차 사이클 — frontend-agent가 **반드시 먼저 읽어야 할 핵심 규칙** (2026-10-06)
+
+**이번 사이클은 기존 9개 엔드포인트의 shape을 하나도 바꾸지 않는다.** 대신 `/api/auth/*` 4개가 신규로 들어오고, 거기에 **단 하나의 절대 규칙**이 붙는다.
+
+> **`cartId` 쿠키와 `sessionId` 쿠키는 완전히 독립이다.** `/api/auth/*` 응답에는 `cartId`가 절대 실리지 않고, 기존 9개 엔드포인트 응답에는 `sessionId`가 절대 실리지 않는다. 로그인해도 장바구니가 바뀌지 않고, 로그아웃해도 장바구니가 비워지지 않는다. **비회원 장바구니 → 회원 장바구니 병합은 구현하지 않았다.**
+
+frontend-agent가 헤더의 인증 영역(`GET /api/auth/me`)과 장바구니 배지(`GET /api/cart`)를 **화면 로드 시 병렬로 호출해도 안전하다** — `/api/auth/*` 핸들러가 `cartId`를 전혀 발급하지 않으므로, `docs/bug-history/2026-08-08_cart-session-race-condition.md`(M4, 쿠키 최초 발급 경쟁 조건)가 재발할 코드 경로 자체가 없다. 단, 인증 영역은 **공용 모듈 하나**(`public/auth-header.js` 권장)로 만들어 화면마다 `GET /api/auth/me`를 중복 호출하지 않을 것 (PRD 20.9).
+
+새 응답 `user`의 키는 **정확히 `email`·`createdAt` 2개**이며, `signup`/`login`/`me` 3개 엔드포인트가 전부 같은 shape을 공유한다. `passwordHash`·`passwordSalt`·`sessionId`는 어떤 응답에도 나타나지 않는다. 상세는 **§2L~§2O**를 볼 것.
 
 ---
 
@@ -69,20 +82,26 @@ npm start       # → http://localhost:3000
 | DELETE | `/api/cart` | **장바구니 전체 비우기** | **3차** | ✅ 구현 완료 (§2I) |
 | POST | `/api/checkout` | **모의 결제 요청** | **4차** | ✅ 구현 완료 (§2J) |
 | GET | `/api/orders/:orderId` | **주문 1건 조회** | **4차** | ✅ 구현 완료 (§2K) |
+| POST | `/api/auth/signup` | **회원가입** | **5차** | ✅ 구현 완료 (§2L) |
+| POST | `/api/auth/login` | **로그인 — 세션 발급** | **5차** | ✅ 구현 완료 (§2M) |
+| POST | `/api/auth/logout` | **로그아웃 — 세션 폐기** | **5차** | ✅ 구현 완료 (§2N) |
+| GET | `/api/auth/me` | **현재 로그인 상태 조회** | **5차** | ✅ 구현 완료 (§2O) |
 
 ~~**이번 범위의 API는 위 6개가 전부다** (PRD 9.12).~~
 ~~🔁 **[3차 개정 — 2026-08-09] 위 문장은 폐기된다. 이번 범위의 API는 총 7개다** (PRD 13.8).~~
+~~🔁 **[4차 개정 — 2026-08-10] 위 두 문장 모두 폐기된다. 이번 범위의 API는 총 9개다** (PRD 18.13).~~
 
-> 🔁 **[4차 개정 — 2026-08-10] 위 두 문장 모두 폐기된다. 이번 범위의 API는 총 9개다** (PRD 18.13). `POST /api/checkout`(모의 결제), `GET /api/orders/:orderId`(주문 조회)가 범위로 편입되었다 (§2J, §2K). 기존 7개의 경로·메서드·응답 shape은 **하나도 바뀌지 않았다** — 실제 회귀 검증 완료(§5-4 (8)).
+> 🔁 **[5차 개정 — 2026-10-06] 위 세 문장 모두 폐기된다. 이번 범위의 API는 총 13개다** (PRD 24.14). `/api/auth/*` 4개(회원가입·로그인·로그아웃·상태조회)가 범위로 편입되었다 (§2L~§2O). 기존 9개의 경로·메서드·응답 shape은 **하나도 바뀌지 않았다** — 실제 회귀 검증 완료(§5-5).
 
-`GET /api/orders`(목록), 주문 취소/환불, 실제 PG 연동(승인 API·웹훅·`returnUrl` 등), 쿠폰/프로모션 코드, 배송 관련 엔드포인트는 **4차에도 구현하지 않았다** — frontend-agent는 이 경로들을 호출하는 코드를 작성하지 말 것. 호출하면 아래처럼 404 JSON이 돌아온다.
+`GET /api/orders`(목록), 주문 취소/환불, 실제 PG 연동(승인 API·웹훅·`returnUrl` 등), 쿠폰/프로모션 코드, 배송 관련 엔드포인트, 비밀번호 재설정·소셜 로그인·회원정보 수정·탈퇴·회원별 주문내역 엔드포인트는 **5차에도 구현하지 않았다** — frontend-agent는 이 경로들을 호출하는 코드를 작성하지 말 것. 호출하면 아래처럼 404 JSON이 돌아온다.
 
 ```
 GET /api/orders  →  404
+PATCH /api/auth/me  →  404
 { "error": { "message": "존재하지 않는 API 경로입니다." } }
 ```
 
-> 1차 문서의 "이번 범위에는 `GET /api/products` 하나뿐"이라는 문장은 위 표로 대체되었다. **§2(GET /api/products)의 스펙 자체는 4차에도 한 글자도 바뀌지 않았다.** §2A~§2I의 경로·메서드·상태 코드·래핑도 전부 그대로이며, 4차에서 추가된 것은 **§2J(결제)와 §2K(주문 조회) 두 엔드포인트뿐**이다.
+> 1차 문서의 "이번 범위에는 `GET /api/products` 하나뿐"이라는 문장은 위 표로 대체되었다. **§2(GET /api/products)의 스펙 자체는 5차에도 한 글자도 바뀌지 않았다.** §2A~§2K의 경로·메서드·상태 코드·래핑도 전부 그대로이며, 5차에서 추가된 것은 **§2L~§2O(회원가입/로그인/로그아웃/상태조회) 4개 엔드포인트뿐**이다.
 
 ---
 
@@ -820,7 +839,187 @@ Cookie: cartId=...        ← 없으면 서버가 발급하지만, 이 경우 �
 
 ---
 
-## 3. 상품 목록 응답 계약 요약 — 여기가 1차의 경계면 버그 지점이다
+## 2L~2O. `/api/auth/*` — 회원가입 / 로그인 / 로그아웃 / 상태조회 (5차 신규)
+
+### 공통 규약
+
+- **저장소**: `Map<normalizedEmail, User>`(`users`) + `Map<sessionId, Session>`(`sessions`), 둘 다 `server.js` 내부 프로세스 메모리. DB·파일 없음. **서버 재시작 시 둘 다 전부 사라진다 — 버그 아님** (PRD D28).
+- **쿠키 2종**: 장바구니 `cartId`(기존, 2차)와 로그인 `sessionId`(신규, 5차)는 **이름도 다르고 코드 경로도 전혀 겹치지 않는다.**
+  - `/api/auth/*` 4개 핸들러는 `ensureCartId()`를 **호출하지 않는다.** 요청에 `cartId` 쿠키가 있어도 없어도 무시한다.
+  - 기존 9개 핸들러(`/api/products*`, `/api/cart*`, `/api/checkout`, `/api/orders/*`)는 `sessionId` 쿠키를 **읽지 않는다.**
+  - 실측: 아래 §5-5에서 두 쿠키가 서로의 응답에 전혀 나타나지 않음을 curl로 확인했다.
+- **`user` 응답 shape은 signup/login/me 3개 엔드포인트가 완전히 동일** — `{ "email": string, "createdAt": string(ISO 8601 UTC) }` 정확히 2개 키. 변환은 서버 내부 `toUserResponse()` 한 곳에서만 한다. `password`/`passwordHash`/`passwordSalt`/`sessionId`/`id`는 **어떤 응답에도 나타나지 않는다.**
+- **에러 shape은 기존과 동일** — `{ "error": { "message": "..." } }`. `code`/`field` 등 추가 필드 없음.
+- 비밀번호는 **`crypto.scrypt`**(Node 내장, `N=16384, r=8, p=1`, salt 16바이트 / 해시 64바이트, 둘 다 hex 문자열)로 해시한다. 비교는 `crypto.timingSafeEqual`. **새 npm 패키지 추가 없음** (`package.json` 변경 없음 — 실측 §5-5).
+
+---
+
+## 2L. POST /api/auth/signup — 회원가입
+
+### 요청
+
+```
+POST /api/auth/signup HTTP/1.1
+Content-Type: application/json
+
+{ "email": "User@Example.com ", "password": "secret1234", "passwordConfirm": "secret1234" }
+```
+
+- ⚠️ **[2026-10-06 개정 — D39] `passwordConfirm` 필드가 추가되어 요청 body가 2필드 → 3필드가 됐다.** `email`/`password`/`passwordConfirm` **3개만** 읽는다. 다른 필드(`name`, `role` 등)가 실려 와도 전부 무시한다.
+- `passwordConfirm`은 **검증에만 쓰이고 저장되지 않는다.** `password`와 "원본 문자열 엄격 비교"(`===`)만 한다 — trim도 대소문자 변환도 하지 않는다 (PRD D35). 누락/`null`/문자열 아님/빈 문자열은 전부 불일치로 취급한다. 아래 400 표 참고.
+- `cartId` 쿠키를 보내도 무시한다 — 이 요청으로 `cartId`가 발급되거나 영향받지 않는다.
+
+### 응답 (201) — 성공
+
+```json
+{ "user": { "email": "user@example.com", "createdAt": "2026-10-06T11:57:49.970Z" } }
+```
+
+- 입력이 `"User@Example.com "`이었지만 응답은 **trim + 소문자 정규화된 값**(`user@example.com`)이다 (PRD D33).
+- **`Set-Cookie`가 전혀 실리지 않는다** — 가입은 자동 로그인이 아니다 (PRD D31). 가입 직후 `GET /api/auth/me`를 호출해도 `{ "user": null }`이다.
+
+### 응답 (400) — 검증 실패. ⚠️ **[2026-10-06 개정 — D39] 검증 순서는 `email` → `password` 길이 → `passwordConfirm` 일치** (셋 중 여러 개가 동시에 틀려도 가장 먼저 오는 조건의 메시지만 나간다)
+
+| 순서 | 조건 | 메시지 |
+|---|---|---|
+| 1 | `email`이 없음/문자열 아님/trim 후 빈 문자열/정규식 불일치 | `이메일 형식이 올바르지 않습니다.` |
+| 1 | `email`이 trim 후 254자 초과 | `이메일은 254자 이하로 입력해 주세요.` |
+| 2 | `password`가 없음/문자열 아님/**원본 길이**(trim 안 함) 4자 미만 또는 20자 초과 | `비밀번호는 4자 이상 20자 이하로 입력해 주세요.` |
+| 3 | **(신규)** `password !== passwordConfirm` — 누락/`null`/문자열 아님/빈 문자열 포함, 원본 문자열 엄격 비교(trim·대소문자 변환 없음) | `비밀번호가 일치하지 않습니다.` |
+
+이메일 정규식(확정): `/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/` — 공백 없음 / `@` 1개 / 도메인에 점 1개 이상 / 라벨이 비어있지 않음.
+
+⚠️ **비밀번호는 trim하지 않는다.** 공백 4자(`"    "`)는 유효한 비밀번호이며, `passwordConfirm`도 같은 공백 4자면 201이다 (PRD D35, 실측 §5-5).
+
+⚠️ **(신규) `passwordConfirm`에는 별도 길이 검증이 없다.** 길이는 `password` 하나만 본다 — `password`가 길이를 통과하면 그와 똑같은 값인 `passwordConfirm`도 자동으로 통과한다.
+
+⚠️ **(신규) 불일치(400)로 끝나면 서버 상태가 전혀 바뀌지 않는다.** 비밀번호 해시를 계산하지 않고, 계정을 생성하지 않고, 기존 계정도 건드리지 않는다 — 3순위 검사는 중복 검사(409)보다 먼저 실행되므로 **이미 가입된 이메일 + 불일치 비밀번호**를 보내도 409가 아니라 **400**(`비밀번호가 일치하지 않습니다.`)이 나간다(실측 §5-5).
+
+### 응답 (409) — 중복 이메일
+
+```json
+{ "error": { "message": "이미 가입된 이메일입니다." } }
+```
+
+- 정규화(trim + 소문자) 후 이미 존재하는 이메일이면 409. **대소문자만 다르거나 공백만 다른 경우도 409다** (실측 §5-5 — `User@Example.com` 가입 후 `  USER@EXAMPLE.COM  `로 재가입 시도 → 409).
+- 검증 순서는 **형식(400) → password 길이(400) → passwordConfirm 일치(400) → 중복(409)**이다. 형식이 틀린 이메일이 우연히 기존 계정과 겹쳐도 400이 먼저 나가고, **불일치 비밀번호도 409보다 먼저 400으로 끝난다** (위 400 섹션 참고).
+- **409가 나도 기존 계정의 비밀번호 해시는 바뀌지 않는다.** 해시 계산 자체를 하지 않는다 (코드가 `users.has()` 체크를 해시 계산보다 먼저 한다). 실측: 중복 가입 시도 후 원래 비밀번호로 로그인 200 성공 확인(§5-5).
+
+---
+
+## 2M. POST /api/auth/login — 로그인
+
+### 요청
+
+```
+POST /api/auth/login HTTP/1.1
+Content-Type: application/json
+
+{ "email": "user@example.com", "password": "secret1234" }
+```
+
+### 응답 (200) — 성공
+
+```
+HTTP/1.1 200 OK
+Set-Cookie: sessionId=<uuid>; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800
+```
+```json
+{ "user": { "email": "user@example.com", "createdAt": "2026-10-06T11:57:49.970Z" } }
+```
+
+- `user` shape은 signup과 **완전히 동일** — 프론트는 같은 렌더 함수를 쓸 수 있다.
+- **이메일은 대소문자 무시, 비밀번호는 대소문자 구분·trim 없음.** `HONG@Ex.com`으로 가입 후 `hong@ex.com`으로 로그인하면 200(실측). 비밀번호 대소문자를 바꾸거나 앞뒤 공백을 넣으면 401(실측, §5-5).
+- **같은 브라우저에서 로그인을 또 하면** 기존 `sessionId`를 `Map`에서 지우고 새 `sessionId`를 발급한다 (PRD D37/24.9). 지워진 이전 `sessionId`로 `/api/auth/logout`을 호출하면 401이 된다. **다른 브라우저의 세션(다른 `sessionId`)은 전혀 건드리지 않는다.**
+
+### 응답 (401) — 자격 증명 실패, 두 경우가 완전히 동일
+
+```json
+{ "error": { "message": "이메일 또는 비밀번호가 올바르지 않습니다." } }
+```
+
+| 경우 | 결과 |
+|---|---|
+| 가입되지 않은 이메일 (비밀번호는 형식상 유효) | **401** (위 메시지) |
+| 가입된 이메일이지만 비밀번호 불일치 | **401** (위 메시지) — **위와 상태 코드·메시지·body가 완전히 동일** |
+
+두 경우를 qa-agent가 비교해도 구별할 수 없다 (PRD D34 — user enumeration 방지, 403 대신 404를 쓴 D23과 같은 판단). 회원이 없을 때도 더미 salt로 scrypt를 한 번 계산한 뒤 401을 반환해 응답 시간 차이를 줄인다(24.7 구현 힌트, 필수 요구사항은 아님).
+
+### 응답 (400) — 형식 검증 실패. **401보다 먼저 검사한다**
+
+메시지·조건은 §2L의 400 표 **1·2순위(이메일 형식/길이 → 비밀번호 길이)와 완전히 동일.** 즉 `{"email":"oops","password":"x"}`는 **400**(401이 아니다), `{"email":"nobody@ex.com","password":"x"}`(3자)도 **400**이다 — 존재하지 않는 이메일의 401을 검증하려면 비밀번호도 4자 이상이어야 한다(PRD 24.8, qa-agent가 특히 유의할 지점).
+
+⚠️ **[2026-10-06 개정] §2L의 400 표 3순위(`passwordConfirm` 일치)는 로그인에 적용되지 않는다.** 로그인 요청 body는 여전히 `email`/`password` **2필드뿐**이다 — `passwordConfirm`을 읽지도 비교하지도 않는다. 설령 요청에 `passwordConfirm`이 실려 와도(값이 `password`와 같든 다르든) 서버는 그 필드를 완전히 무시하며, 결과(200/400/401)는 **그 필드가 아예 없을 때와 동일**하다. `비밀번호가 일치하지 않습니다.` 메시지는 로그인 응답에서 **절대 나오지 않는다** (PRD 24.5/24.8, 실측 §5-5).
+
+---
+
+## 2N. POST /api/auth/logout — 로그아웃
+
+### 요청
+
+```
+POST /api/auth/logout HTTP/1.1
+Cookie: sessionId=<uuid>
+```
+
+body 없음. 이번 사이클에 **로그인을 요구하는 유일한 엔드포인트**다 (PRD 24.12).
+
+### 응답 (200) — 유효한 세션이 있을 때
+
+```
+Set-Cookie: sessionId=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0
+```
+```json
+{ "user": null }
+```
+
+- 해당 `sessionId`를 `Map`에서 삭제한다. `GET /api/auth/me`의 비로그인 응답과 **완전히 같은 shape**이라 프론트가 같은 렌더 함수로 처리할 수 있다 (204 아님).
+
+### 응답 (401) — 세션 없음 / 위조 / 만료, 세 경우 모두 동일
+
+```json
+{ "error": { "message": "로그인이 필요합니다." } }
+```
+
+쿠키 폐기 헤더(`Max-Age=0`)가 **이 401 응답에도 함께 실린다** — `GET /api/auth/me`와 다른 점이다(아래 참고). 쿠키가 아예 없었던 경우에도 로그아웃은 폐기 헤더를 싣는다. 이유: logout은 "지금 상태가 뭐냐"를 묻는 조회가 아니라 "세션을 변경하는 조작"이라서, 실패해도 "로그인 아님"이라는 결과를 쿠키로 확정해 준다.
+
+⚠️ **멱등하지 않다.** 로그인 → 로그아웃 → 같은 쿠키로 로그아웃을 또 호출하면 **200 → 401**이 된다(PRD 24.10 — `POST /api/checkout`의 200→409와 같은 패턴). 실측 §5-5.
+
+---
+
+## 2O. GET /api/auth/me — 현재 로그인 상태 조회
+
+### 요청
+
+```
+GET /api/auth/me HTTP/1.1
+Cookie: sessionId=<uuid 또는 없음>
+```
+
+### 응답 — **항상 200. 401을 절대 반환하지 않는다** (PRD D36)
+
+```json
+{ "user": { "email": "user@example.com", "createdAt": "2026-10-06T11:57:49.970Z" } }
+```
+비로그인 / 세션 무효(위조·서버 재시작) / 만료:
+```json
+{ "user": null }
+```
+
+- `user` 키는 **항상 존재**하고 값이 `null`이다 — 생략하거나 `{}`를 보내지 않는다.
+- **쿠키 유무에 따라 `Set-Cookie` 동작이 다르다** (여기가 frontend-agent·qa-agent가 가장 혼동하기 쉬운 지점):
+
+  | 요청에 쿠키가… | 응답 | `Set-Cookie` |
+  |---|---|---|
+  | 아예 없음 | `{ "user": null }` | **없음** — 지울 쿠키가 없으므로 (실측 §5-5) |
+  | 있지만 `Map`에 없음(위조·서버 재시작) | `{ "user": null }` | **폐기 헤더** (`Max-Age=0`) 실림 |
+  | 있지만 만료됨(`expiresAt` 경과) | `{ "user": null }` | **폐기 헤더** 실림 |
+  | 유효함 | `{ "user": {...} }` | 없음 (갱신하지 않는다) |
+
+- **슬라이딩 만료를 하지 않는다** — 이 엔드포인트를 몇 번을 호출해도 `expiresAt`이 늘어나지 않는다. 모든 화면이 로드마다 이 엔드포인트를 부르므로, 슬라이딩이면 세션이 사실상 만료되지 않는다 (PRD 24.11).
+- **세션 TTL은 환경변수 `AUTH_SESSION_TTL_SECONDS`로 조절 가능**(기본 `604800`초=7일). 짧게 설정해 기동하면 만료 케이스를 몇 초 안에 재현할 수 있다(PRD D36, qa-agent용 — 인증 우회 장치가 아니다).
+
+---
 
 | 결정 | 확정값 | 절대 하지 말 것 |
 |---|---|---|
@@ -1213,12 +1412,140 @@ curl -s -c jarA.txt -b jarA.txt -X POST http://localhost:3456/api/checkout \
 
 ---
 
+### 5-5. 5차 검증 기록 (2026-10-06, 실제 실행 결과 — `PORT=3101 node server.js`)
+
+#### (1) 회원가입 — 성공/중복/형식 검증/경계값
+
+```
+POST /api/auth/signup  { "email": "User@Example.com ", "password": "secret1234" }
+→ 201 {"user":{"email":"user@example.com","createdAt":"2026-10-06T11:57:49.970Z"}}  ✅ trim+소문자 정규화
+
+POST /api/auth/signup  (같은 이메일, 다른 비밀번호로 재시도)
+→ 409 {"error":{"message":"이미 가입된 이메일입니다."}}  ✅
+
+이메일 254자  → 201 (통과) ✅
+이메일 255자  → 400 {"error":{"message":"이메일은 254자 이하로 입력해 주세요."}}  ✅
+
+비밀번호 3자  → 400 "비밀번호는 4자 이상 20자 이하로 입력해 주세요."  ✅
+비밀번호 4자  → 201  ✅
+비밀번호 20자 → 201  ✅
+비밀번호 21자 → 400 (위와 동일 메시지)  ✅
+
+비밀번호 공백 4자("    ")  → 201 (trim하지 않으므로 유효)  ✅ (PRD D35 / 26장 A11)
+
+잘못된 JSON body → 400 {"error":{"message":"요청 본문(JSON)을 해석할 수 없습니다."}}  ✅ (기존 parse-fail 핸들러가 그대로 적용됨, 서버가 죽지 않음)
+```
+
+#### (2) 중복 가입 후에도 기존 비밀번호가 바뀌지 않음 (A5 — 이번 범위에서 가장 치명적일 수 있는 실수 지점)
+
+`user@example.com`으로 가입 → 같은 이메일로 다른 비밀번호(`other999`)로 재가입 시도(409) → **원래 비밀번호(`secret1234`)로 로그인** → **200 성공**을 실제로 확인했다. 409 분기가 `users.has()` 체크 직후 바로 리턴하므로 해시 계산·덮어쓰기 자체가 일어나지 않는다.
+
+#### (3) 로그인 — 성공/대소문자·공백 규칙/자격증명 401/검증 순서
+
+```
+정상 로그인 → 200 + Set-Cookie: sessionId=<uuid>; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800  ✅
+
+가입되지 않은 이메일(비밀번호 4자 이상) → 401 "이메일 또는 비밀번호가 올바르지 않습니다."  ✅
+가입된 이메일 + 틀린 비밀번호          → 401 (위와 완전히 동일한 메시지·상태 코드)  ✅ (B2/B3/B4 구별 불가 확인)
+
+형식이 틀린 이메일("oops") + 짧은 비밀번호("x")     → 400 (401이 아님) ✅ (검증 순서 — 24.8)
+존재하지 않는 이메일 + 3자 비밀번호                → 400 (비밀번호 길이 검증이 자격증명 확인보다 먼저) ✅
+
+이메일 앞뒤 공백·대소문자 다르게("  USER@EXAMPLE.COM  ")로 로그인 → 200 (이메일은 trim+소문자 무시) ✅
+```
+
+#### (4) 로그아웃/세션 조회 — 멱등성 없음, 쿠키 유무별 `Set-Cookie` 분기, 위조·만료 세션
+
+```
+쿠키 없이 로그아웃                        → 401 "로그인이 필요합니다." + Set-Cookie: sessionId=;...;Max-Age=0  ✅
+로그인 후 로그아웃                        → 200 {"user":null} + 같은 폐기 헤더  ✅
+같은 쿠키로 로그아웃 또 호출(멱등 아님)      → 401 (의도된 동작 — 200→401)  ✅
+위조된 sessionId로 로그아웃                → 401 + 폐기 헤더  ✅ (서버가 죽지 않고 안전하게 401)
+
+쿠키 없이 GET /api/auth/me                → 200 {"user":null}, Set-Cookie 헤더 없음(지울 게 없음)  ✅
+위조된 sessionId로 GET /api/auth/me        → 200 {"user":null} + 폐기 헤더(Max-Age=0) 실림  ✅
+```
+
+로그아웃과 `me`가 "쿠키가 아예 없을 때" 서로 다르게 동작함(`me`는 Set-Cookie 생략, logout은 항상 폐기 헤더)을 실제 응답 헤더로 확인했다 — PRD D36이 요구하는 비대칭이 정확히 구현돼 있다. 또한 **Set-Cookie 헤더가 응답마다 정확히 한 줄**임을 확인했다(내부적으로 `findSession()`이 부작용 없이 조회만 하고, 쿠키 폐기 호출은 각 라우트가 한 번씩만 하도록 분리해 중복 헤더가 나가지 않게 만들었다).
+
+#### (5) 🔒 `cartId`/`sessionId` 완전 독립 (D27 — 이번 사이클의 가장 중요한 검증)
+
+```
+signup 응답 Set-Cookie   → 없음 (cartId도 sessionId도 안 실림)  ✅
+login 응답 Set-Cookie    → sessionId만 실림 (cartId 없음)  ✅
+me 응답 Set-Cookie       → (쿠키 있었을 때만) sessionId만, cartId는 절대 없음  ✅
+GET /api/cart 응답       → cartId만 실림 (sessionId 없음)  ✅
+```
+
+코드 레벨 교차 점검(grep)도 실행했다 — `/api/cart*`·`/api/checkout`·`/api/orders` 핸들러 블록 안에 `sessionId` 문자열이 **0건**, `/api/auth/*` 핸들러 블록 안에 `ensureCartId` 호출이 **0건**임을 확인했다. 두 쿠키를 발급하는 코드 경로가 끝까지 분리되어 있으므로, 모든 화면이 로드 시 `GET /api/cart`와 `GET /api/auth/me`를 병렬로 호출해도(PRD 20.2/20.9) `docs/bug-history/2026-08-08_cart-session-race-condition.md`(M4)가 재발할 수 없다.
+
+#### (6) 기존 9개(1~4차) 엔드포인트 회귀 — `/api/auth/*` 추가가 기존 API에 영향 없음
+
+```
+GET /api/products  → 200 (변동 없음)  ✅
+GET /api/cart       → 200 (변동 없음, Set-Cookie: cartId=... 그대로)  ✅
+```
+
+`package.json`에 **새 의존성이 추가되지 않았음**을 확인했다(`express`만 그대로, `bcrypt`/DB/세션 미들웨어 없음 — PRD 26장 D13).
+
+#### (7) M5(공용 에러 핸들러) 반영 확인 — 코드 리뷰
+
+`server.js`의 공용 500 핸들러에 `req.path.startsWith('/api/auth')` → `인증 요청을 처리하지 못했습니다.` 분기를 **기존 4개 분기(products/cart/checkout/orders) 다음 5번째로** 추가했다(PRD 24.17). 새 핸들러를 만들지 않고 기존 `if/else if` 체인에 이어 붙였으므로 기존 네 문구는 바뀌지 않았다. (인증 API용 `simulate=error` 훅은 PRD에 명세되어 있지 않아 만들지 않았고, 분기는 문자열 비교 한 줄이라 코드 리뷰로 충분하다고 판단했다 — 4차와 같은 판단.)
+
+### 5-6. 5차 핫픽스 검증 기록 (2026-10-06, D39 — `passwordConfirm` 추가, 실제 실행 결과 — `PORT=3101 node server.js`)
+
+사용자 피드백(D39)으로 `POST /api/auth/signup` 요청 body에 `passwordConfirm`이 추가되고, 검증 순서가 `email → password 길이 → passwordConfirm 일치 → 중복(409)`으로 바뀐 뒤 실제로 확인한 결과다.
+
+```
+① 일치 + 유효한 길이
+POST /api/auth/signup {"email":"user1@example.com","password":"secret1234","passwordConfirm":"secret1234"}
+→ 201 {"user":{"email":"user1@example.com","createdAt":"..."}}  ✅
+
+② 불일치
+POST /api/auth/signup {"email":"user2@example.com","password":"secret1234","passwordConfirm":"secret123"}
+→ 400 {"error":{"message":"비밀번호가 일치하지 않습니다."}}  ✅
+
+③ passwordConfirm 누락
+POST /api/auth/signup {"email":"user3@example.com","password":"secret1234"}
+→ 400 {"error":{"message":"비밀번호가 일치하지 않습니다."}}  ✅
+
+③' passwordConfirm이 null / 숫자(타입 아님)
+→ 둘 다 400 (위와 동일 메시지)  ✅
+
+④ 이미 가입된 이메일(user1) + 불일치 비밀번호로 재시도
+POST /api/auth/signup {"email":"user1@example.com","password":"anotherpass","passwordConfirm":"wrong"}
+→ 400 {"error":{"message":"비밀번호가 일치하지 않습니다."}}  (409가 아니다) ✅
+→ 뒤이어 원래 비밀번호(secret1234)로 로그인 → 200 성공 (계정이 전혀 바뀌지 않았음) ✅
+
+⑤ 대소문자/공백 차이
+passwordConfirm="Secret1234" (password="secret1234") → 400  ✅
+passwordConfirm="secret1234 "(뒤 공백)                 → 400  ✅
+
+⑥ 검증 순서 — 둘 이상 동시에 틀림
+형식 틀린 이메일 + 불일치                 → 400 "이메일 형식이 올바르지 않습니다." (이메일이 1순위)  ✅
+정상 이메일 + 3자 비밀번호 + 불일치         → 400 "비밀번호는 4자 이상 20자 이하로 입력해 주세요." (길이가 일치보다 먼저)  ✅
+
+⑦ 로그인 회귀 — passwordConfirm은 로그인에 전혀 영향을 주지 않는다
+POST /api/auth/login {"email":"user1@example.com","password":"wrongpass","passwordConfirm":"wrongpass"}
+→ 401 {"error":{"message":"이메일 또는 비밀번호가 올바르지 않습니다."}}  ✅ (일치하는 값을 실어도 결과 동일 — 서버가 필드 자체를 읽지 않음)
+정상 비밀번호로 로그인(passwordConfirm 필드 없이) → 200  ✅ (기존 동작 그대로, 회귀 없음)
+
+⑧ 공백 비밀번호(D35) — passwordConfirm에도 trim 없음이 그대로 적용됨
+password="    "(공백 4자), passwordConfirm="    " (동일) → 201  ✅
+```
+
+변경은 `server.js`의 `/api/auth/signup` 핸들러(요청 destructuring에 `passwordConfirm` 추가 + 형식 검증 통과 직후·중복 검사 이전에 `if (passwordConfirm !== password)` 400 분기 1개 삽입)와 `PASSWORD_MISMATCH_ERROR` 상수 추가뿐이다. `validateAuthCredentialsFormat()`(email/password 형식 검증 공용 함수, signup·login 공유)·`/api/auth/login` 핸들러·`toUserResponse()`·세션 관련 함수는 **전혀 건드리지 않았다** — 로그인은 여전히 2필드만 읽고 `passwordConfirm`이라는 문자열이 로그인 라우트 코드에 등장하지 않는다.
+
+🐛 **`docs/bug-history/` 재확인 결과 — 관련 히스토리 없음.** M4(쿠키 경쟁조건)는 `/api/auth/*` 핸들러의 `cartId` 비관여 구조(24.13)를 건드리지 않았으므로 무관하다. M5(공용 에러 핸들러 문구)는 500 경로 분기 문제이고, 이번 변경은 400 분기 추가라 M5 패턴과 무관하다 — 기존 `인증 요청을 처리하지 못했습니다.` 500 분기는 그대로 유지된다. M1~M3도 메시지 하드코딩·DOM 가시성 이슈로 백엔드 범위 밖이다.
+
+---
+
 ## 6. 파일 위치
 
 | 파일 | 역할 |
 |---|---|
-| `package.json` | `npm start` → `node server.js`, 의존성 `express@^4.19.2` (**2차에서 새 의존성 추가 없음**) |
-| `server.js` | Express 앱. 정적 서빙 + `express.json()` + **API 9개**(3차: `DELETE /api/cart` 추가, 4차: `POST /api/checkout` + `GET /api/orders/:orderId` 추가) + 장바구니 저장소(`Map<cartId, CartItem[]>`) + **주문 저장소(`Map<orderId, Order>`, 4차 신규)** + 할인 계산(`buildCartLine`/`buildCartSnapshot`) + 주문번호 발급(`generateOrderId`) + 에러 핸들러. **4차에서도 새 파일·새 의존성 없음** |
+| `package.json` | `npm start` → `node server.js`, 의존성 `express@^4.19.2` (**5차에서도 새 의존성 추가 없음** — `crypto`는 Node 내장) |
+| `server.js` | Express 앱. 정적 서빙 + `express.json()` + **API 13개**(3차: `DELETE /api/cart` 추가, 4차: `POST /api/checkout` + `GET /api/orders/:orderId` 추가, **5차: `/api/auth/*` 4개 추가**) + 장바구니 저장소(`Map<cartId, CartItem[]>`) + 주문 저장소(`Map<orderId, Order>`) + **회원·세션 저장소(`Map<normalizedEmail, User>` + `Map<sessionId, Session>`, 5차 신규)** + 할인 계산(`buildCartLine`/`buildCartSnapshot`) + 주문번호 발급(`generateOrderId`) + **비밀번호 해시(`hashPassword`/`verifyPassword`) + 세션 조회(`resolveSession`/`findSession`) + 응답 변환(`toUserResponse`), 5차 신규** + 에러 핸들러. **5차에서도 새 파일·새 의존성 없음** |
 | `data/products.js` | 시드 상품 8개 (`module.exports = { products }`) — **2차 이후 변경 없음** |
 | `public/images/p1.svg` … `p8.svg` | 상품 플레이스홀더 이미지 (백엔드 생성, 외부 네트워크 불필요) |
 | `public/index.html` | frontend-agent가 만든 목록 화면. `/`에서 서빙 중 |
@@ -1266,6 +1593,30 @@ curl -s -c jarA.txt -b jarA.txt -X POST http://localhost:3456/api/checkout \
 - `POST /api/checkout`, `GET /api/orders/:orderId` 모두 **`/api` catch-all 404 핸들러보다 위**에 등록했다 (2차 메모의 규칙을 그대로 따름).
 - `ordererPhone`은 **정규화(하이픈 제거/추가)하지 않고 trim만** 해서 저장한다 — PRD 데이터 모델이 "입력한 그대로 저장·반환"을 명시했기 때문이다. frontend-agent는 표시할 때 서버가 준 문자열을 그대로 쓰면 된다.
 
+### 5차 구현 메모 (backend-agent → qa-agent / frontend-agent)
+
+- **작업 시작 전 `docs/bug-history/`를 확인했다.** 확인한 3개 문서와 이번 사이클에서의 반영은 다음과 같다.
+  - 🐛 **BUG-2026-08-08-01 (M4, 쿠키 최초 발급 경쟁 조건) — 직접 반영, 가장 중요한 지점.** M4 문서의 "왜 다시 터질 수 있는가"가 **"로그인/회원 기능을 나중에 추가해서 '세션 확인'이라는 새로운 병렬 호출이 생길 때"** 를 재발 조건으로 정확히 지목했고, PRD도 20.9/24.13에서 같은 지점을 못 박았다. 모든 화면이 로드 시 `GET /api/cart`와 `GET /api/auth/me`를 병렬로 호출하게 되는데, 이 두 요청이 각자 `cartId`를 발급하려 들면 경쟁이 성립한다. 그래서 **`/api/auth/*` 4개 핸들러 어디에도 `ensureCartId()` 호출이나 `cartId` 문자열이 등장하지 않게** 만들었고, 반대로 기존 9개 핸들러 어디에도 `sessionId` 문자열이 등장하지 않게 만들었다. `cartId`를 발급하는 코드 경로가 끝까지 `ensureCartId()` 하나뿐이므로, 두 요청이 동시에 와도 경쟁이 성립할 수 없다. 코드 레벨 grep으로 실측 확인(§5-5 (5)).
+  - 🐛 **BUG-2026-08-08-02 (M5, 공용 에러 핸들러 문구) — 직접 반영.** PRD 24.17이 "분기를 추가하지 않으면 로그인 실패 화면에 '상품 목록을 불러오지 못했습니다'가 뜬다"고 재차 예고한 지점이다. 기존 4개 분기(`products`/`cart`/`checkout`/`orders`) 다음에 `/api/auth` → `인증 요청을 처리하지 못했습니다.` 를 5번째로 이어 붙였다. 새 핸들러를 만들지 않았고 기존 네 문구는 바뀌지 않았다(§5-5 (7)).
+  - 🐛 **BUG-2026-08-NOTES (M1/M2/M3) — 직접적인 백엔드 반영 사항 없음, frontend-agent 공유용으로만 언급.** M1(백엔드가 상황별 메시지를 보내기 시작하면 프론트도 노출해야 한다)은 이번에 가입·로그인 에러 메시지가 5종류(이메일 형식/길이, 비밀번호 길이, 중복 이메일, 자격증명 실패)로 늘었다는 점에서 그대로 유효하다 — `signup-error`/`login-error`가 `error.message`를 하드코딩 없이 그대로 표시해야 한다. M2(DOM 존재 vs 가시성)는 이번 "확정 전/게스트/로그인" 3상태 헤더(PRD 20.5)에 직접 해당하지만 프론트 구현 몫이다. 백엔드 쪽에서는 세 상태를 명확히 구분할 수 있는 입력(`{user:null}` vs `{user:{...}}`)을 제공하는 것으로 책임을 다했다.
+- **회원·세션 저장소는 `server.js` 안의 `Map<normalizedEmail, User>` + `Map<sessionId, Session>`**이다. 장바구니·주문과 같은 판단(D6/D21과 같은 계열의 D28) — 별도 파일·DB를 두지 않았다.
+- **비밀번호 해시 호출은 `hashPassword()`/`verifyPassword()` 2개 함수 밖에 나타나지 않는다.** `crypto.scryptSync`를 직접 호출하는 곳은 이 두 함수와, 회원이 없을 때 타이밍을 맞추기 위한 더미 해시 계산(로그인 라우트 안, 24.7 구현 힌트) 한 곳뿐이다. 비교는 전부 `crypto.timingSafeEqual`을 쓴다 — `===` 문자열 비교를 쓰는 곳이 없다.
+- **세션 조회는 `findSession()`(부작용 없는 순수 조회) + `resolveSession()`(me가 쓰는, 무효/만료 시 쿠키 폐기까지 포함하는 래퍼) 2단으로 나눴다.** 처음엔 `resolveSession()` 하나로 합치려 했으나, **logout과 me가 "쿠키가 아예 없을 때 폐기 헤더를 보낼지"에서 서로 다른 답**을 요구한다는 걸 구현하면서 발견했다(PRD 24.10 vs 24.11 — logout은 세 경우 모두 폐기, me는 쿠키가 있었을 때만 폐기). 하나의 함수가 쿠키 Set-Cookie까지 책임지면 이 비대칭을 표현할 수 없어서, "조회만 하는 함수"와 "me의 정책을 아는 래퍼"로 나누고 logout은 조회 함수를 직접 써서 자신의 정책(항상 폐기)을 구현했다. 이 분리 덕에 **Set-Cookie 헤더가 응답마다 정확히 한 번**만 나간다(처음 설계에서는 무효 세션 + logout 조합일 때 두 번 나갈 뻔한 것을 구현 중 발견하고 고쳤다).
+- **`toUserResponse()`가 응답 변환의 유일한 지점**이다(PRD D30/24.19). `signup`/`login`/`me` 3개 라우트가 전부 이 함수만 거쳐 `user`를 만든다 — 라우트 핸들러 안에서 `{ email: user.email, createdAt: user.createdAt, ...}` 식으로 직접 조립하는 코드가 없으므로 `passwordHash`/`passwordSalt`가 새어나갈 지점이 구조적으로 없다.
+- **세션 TTL은 `SESSION_TTL_SECONDS = Number(process.env.AUTH_SESSION_TTL_SECONDS) || 604800` 한 상수로만** 읽는다. 쿠키의 `Max-Age`와 `Session.expiresAt` 계산(`Date.now() + SESSION_TTL_SECONDS * 1000`)이 같은 상수를 쓰므로 둘이 어긋날 수 없다.
+- `/api/auth/signup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/me` 모두 **`/api` catch-all 404 핸들러보다 위**에 등록했다 (2차 메모의 규칙을 그대로 따름).
+- 이메일은 **정규식 검사(형식) → 길이 검사 → 정규화(trim+소문자)** 순서로 처리하고, 비밀번호는 **원본 그대로 길이만** 검사한다 — 두 필드를 같은 유틸 함수로 묶지 않았다(PRD D35 경고 — "같은 유틸로 처리하려다 통일하는 실수"를 피하기 위해 `normalizeEmail()`은 이메일 전용으로만 존재하고 비밀번호 쪽에는 대응 함수 자체가 없다).
+
+### 5차 핫픽스 구현 메모 (2026-10-06, D39 — `passwordConfirm` 추가)
+
+- **작업 시작 전 `docs/bug-history/` 3개 문서를 다시 확인했다 — 관련 히스토리 없음.** M4(쿠키 경쟁조건)는 `cartId`/`ensureCartId()` 쪽 이슈이고 이번 변경은 `/api/auth/signup` 안에서 `passwordConfirm` 비교 한 줄을 추가한 것뿐이라 그 구조(24.13)를 건드리지 않는다. M5(공용 500 핸들러 문구)는 서버 예외(5xx) 경로 문제인데 이번 변경은 사용자 입력에 대한 400 분기라 M5 패턴과 무관하다 — 기존 `/api/auth` 500 분기(`인증 요청을 처리하지 못했습니다.`)는 그대로 둔다. M1~M3도 이번 변경 범위(백엔드 검증 로직) 밖이다. 따라서 이번 수정에서는 **회피/반영할 재발 패턴이 없다고 판단**했고, 억지로 연결하지 않았다.
+- `validateAuthCredentialsFormat(email, password)` (email 형식/길이 → password 길이, signup·login 공유 함수)는 **한 글자도 바꾸지 않았다.** `passwordConfirm` 검사는 이 함수가 통과(`null` 반환)한 **뒤에** signup 핸들러 안에서 별도로 수행한다 — login이 이 공유 함수를 쓰는 한, login 쪽에 `passwordConfirm` 로직이 새어 들어갈 길이 없다.
+- 비교는 `passwordConfirm !== password` **한 줄**이다. `password`는 이 지점에 도달했다는 것 자체가 `validateAuthCredentialsFormat`을 통과했다는 뜻이므로 **이미 문자열임이 보장**된다 — 따라서 `passwordConfirm`이 `undefined`/`null`/숫자/빈 문자열이어도 `!==` 비교 한 번으로 자연히 불일치(400)가 되며, 타입을 검사하는 별도 분기(`typeof passwordConfirm !== 'string'`)가 필요하지 않다. 대소문자·trim 처리를 전혀 하지 않으므로 D35(비밀번호는 trim하지 않는다)가 그대로 지켜진다.
+- 검사 위치는 **형식 검증 통과 직후, `users.has(normalizedEmail)` 중복 체크 이전**이다 — 이 순서 덕에 "이미 가입된 이메일 + 불일치 비밀번호"가 409가 아니라 400으로 끝나고(PRD 24.3/24.4 — 26장 A25), 불일치로 끝난 요청은 `hashPassword()` 호출 자체에 도달하지 않으므로 서버 상태(`users` Map)가 요청 전과 완전히 동일하게 유지된다.
+- `PASSWORD_MISMATCH_ERROR`(`비밀번호가 일치하지 않습니다.`) 상수 하나만 추가했다 — 불일치 사유(누락/null/타입/대소문자/공백)별로 메시지를 나누지 않는다. 기존 5개 메시지 상수(`EMAIL_FORMAT_ERROR` 등)는 그대로이며, 메시지 문자열이 1개 추가됐을 뿐 기존 6→ 이제 포함 **총 1개 신규**다.
+- `/api/auth/login` 핸들러와 `toUserResponse()`는 **전혀 수정하지 않았다.** 로그인 요청 destructuring은 여전히 `const { email, password } = body;`이며 `passwordConfirm`이라는 식별자가 로그인 라우트 코드에 등장하지 않는다 — 요청에 그 필드가 실려 와도 애초에 변수로 꺼내지 않으므로 "읽지도, 비교하지도 않는다"(PRD 24.5)는 요구가 코드 구조로 보장된다.
+- curl 실측 전체 기록은 §5-6 참고.
+
 ---
 
 ## 변경 이력
@@ -1276,3 +1627,5 @@ curl -s -c jarA.txt -b jarA.txt -X POST http://localhost:3456/api/checkout \
 | 2026-08-08 | **2차 사이클 추가** — `GET /api/products/:id`(§2A), 장바구니 공통 규약·쿠키(§2B), `GET /api/cart`(§2C), `POST /api/cart/items`(§2D), `PATCH /api/cart/items/:productId`(§2E), `DELETE /api/cart/items/:productId`(§2F), 장바구니 계약 요약(§2G), 2차 검증 기록(§5-2) 추가. §1 엔드포인트 목록을 6개로 갱신 | PRD 9.1~9.13 구현 완료. **§2(`GET /api/products`)의 스펙과 구현은 변경 없음** — 1차 회귀 검증도 §5-2에 기록 |
 | 2026-08-09 | **3차 사이클 추가** — ① **`CartItem` 재정의(§2H)**: 할인 필드 5개(`lineSubtotal`·`discountApplied`·`discountPercent`·`discountedUnitPrice`·`discountAmount`) 추가로 필드 6개 → **11개**, **`lineTotal`의 의미를 "할인 후 최종 금액"으로 변경**, `totalPrice`는 할인 반영 합계. ② **`DELETE /api/cart`(§2I)** 신규 — 200 + 빈 스냅샷, 멱등, 에러 케이스 없음, 라우팅 충돌 검증. ③ 문서 최상단에 **파괴적 변경 경고 배너** 추가, §1 목록을 7개로 갱신, §2B의 2차 예시·표에 "옛 버전" 표시, §5-2의 "`DELETE /api/cart`는 404" 항목 폐기 표시. ④ **3차 검증 기록(§5-3)** — 9 vs 10 경계, 전수 불변식 792줄, 멱등성, 라우팅, 격리, 1·2차 회귀. ⑤ 공용 500 핸들러 문구를 경로별로 분기 (bug-history M5 반영) | PRD 11~14장 / 13.1~13.9 구현 완료. **기존 6개 엔드포인트의 경로·메서드·상태 코드·에러 문구·래핑은 하나도 바뀌지 않았다** — 회귀 검증을 §5-3 (8)에 기록. `lineTotal` 의미 변경은 이름이 같아 조용히 틀리는 유형이라 배너·§2H·§2B 세 곳에 중복 명시 |
 | 2026-08-10 | **4차 사이클 추가 (모의 결제)** — ① **`POST /api/checkout`(§2J)** 신규 — 200(`{order}`, 9개 필드) / 402(승인 거절) / 400(입력 검증 3종) / 409(빈 장바구니), 검증 순서 400→409→402, 성공 시 같은 요청 안에서 주문 저장 + 장바구니 비우기(참조 비공유). ② **`GET /api/orders/:orderId`(§2K)** 신규 — 200(checkout 성공 응답과 동일 shape) / 404(없는 주문·남의 주문·쿠키 없음 3종을 동일하게 처리, 403 아님). ③ §1 목록을 **9개**로 갱신, 이전 "6개/7개가 전부다" 폐기 문구를 이중 취소선으로 남기고 4차 개정 배너로 대체. ④ **4차 검증 기록(§5-4)** — 입력 검증 12케이스, 402 시 장바구니 불변, 200 시 부수효과(저장+비우기)와 items 참조 비공유, 중복 결제 시 409, 주문 조회 소유자 판정 3경로(없음/남의 것/쿠키없음), 경계값, 기존 7개 회귀, M5 반영 코드 리뷰. ⑤ **공용 500 핸들러에 `/api/checkout`·`/api/orders` 분기 추가** (`docs/bug-history/2026-08-08_generic-error-message-leak.md` BUG-2026-08-08-02, M5 — PRD 18.12가 결제 API를 이름으로 지목해 예고한 재발 지점). ⑥ §6에 **4차 구현 메모** 추가 — 확인한 bug-history 3개 문서와 반영/판단 근거 명시 | PRD 15~19장 / 18.1~18.16 구현 완료. **기존 7개 엔드포인트(§2~§2I)의 경로·메서드·상태 코드·에러 문구·래핑은 하나도 바뀌지 않았다** — 회귀 검증을 §5-4 (8)에 기록. `Order`의 `cartId`는 서버 내부 전용이며 응답에 절대 포함하지 않음(`toOrderResponse()`)을 §2J에서 실측 확인(§5-4 (4)) |
+| 2026-10-06 | **5차 사이클 추가 (회원가입/로그인/로그아웃)** — ① **`POST /api/auth/signup`(§2L)** 신규 — 201(`{user}`, email+createdAt 2개 키, Set-Cookie 없음) / 400(이메일 형식·길이, 비밀번호 길이) / 409(중복 이메일, 비밀번호 해시 미계산·기존 계정 불변). ② **`POST /api/auth/login`(§2M)** 신규 — 200(`{user}` + `Set-Cookie: sessionId`) / 400(형식 검증, 401보다 먼저) / 401(이메일 없음·비밀번호 불일치 — 두 경우 완전히 동일한 메시지, D34). ③ **`POST /api/auth/logout`(§2N)** 신규 — 200(`{user:null}` + 쿠키 폐기) / 401(세션 없음·위조·만료 세 경우 동일, 멱등하지 않음 — 200→401). ④ **`GET /api/auth/me`(§2O)** 신규 — 항상 200, 로그인 `{user}` / 비로그인 `{user:null}`, 쿠키 유무에 따라 `Set-Cookie` 폐기 헤더 싣는 조건이 다름(쿠키 아예 없으면 생략). ⑤ §1 목록을 **13개**로 갱신, 이전 "6/7/9개가 전부다" 폐기 문구에 5차 개정 배너 추가. ⑥ 문서 최상단에 **5차 핵심 규칙 배너**(`cartId`/`sessionId` 완전 독립) 추가. ⑦ **5차 검증 기록(§5-5)** — 가입/중복/경계값, 비밀번호 비trim, 중복 가입 후 비밀번호 불변(A5), 로그인 대소문자·공백 규칙, 401 구별불가 확인(B2~B4), 로그아웃 비멱등·세 가지 401 조건, me의 Set-Cookie 조건부 분기, **`cartId`/`sessionId` 완전 독립 실측 + 코드 grep(가장 중요)**, 기존 9개 회귀, M5 반영 코드 리뷰. ⑧ §6에 **5차 구현 메모** 추가 — M4를 이번 사이클의 최우선 과제로 직접 반영한 근거, `hashPassword`/`verifyPassword`/`findSession`/`resolveSession`/`toUserResponse` 단일 책임 설계 근거 명시 | PRD 20~26장 / 24.1~24.19 구현 완료. **기존 9개 엔드포인트(§2~§2K)의 경로·메서드·상태 코드·에러 문구·래핑은 하나도 바뀌지 않았다** — 회귀 검증을 §5-5 (6)에 기록. `package.json`에 새 의존성 없음(§5-5 (6)) — `crypto.scrypt` 등 Node 내장만 사용. `docs/bug-history/2026-08-08_cart-session-race-condition.md`(M4)가 "로그인 기능 추가 시 재발"을 명시적으로 예고한 바로 그 지점이며, `ensureCartId()`/`resolveSession()`을 서로의 코드 경로에 절대 등장시키지 않는 구조로 차단했다(§5-5 (5)에서 실측+grep 모두 확인) |
+| 2026-10-06 (핫픽스) | **5차 사이클 내 사용자 피드백 반영 (D39 — `passwordConfirm` 추가)** — `POST /api/auth/signup`(§2L) 요청 body가 **2필드 → 3필드**(`passwordConfirm` 추가)로 바뀌고, 검증 순서가 `email → password 길이 → passwordConfirm 일치(신규, 400) → 중복(409)`으로 확정됐다. 새 400 메시지 `비밀번호가 일치하지 않습니다.`(사유별로 나누지 않음 — 누락/`null`/타입·대소문자·공백 전부 동일 메시지) 추가. **이미 가입된 이메일 + 불일치 비밀번호는 409가 아니라 400**이 나가도록 순서를 고정했고, 불일치 400일 때 해시 계산·계정 생성·기존 계정 변경이 전혀 일어나지 않음을 실측 확인(§5-6). `POST /api/auth/login`은 **코드 변경 없음** — 여전히 2필드만 읽고 `passwordConfirm`을 받아도 무시한다(§2M에 이 사실을 명시 보강). `server.js`의 변경은 상수 1개(`PASSWORD_MISMATCH_ERROR`) + signup 핸들러 안 400 분기 1개뿐 — `validateAuthCredentialsFormat()`·`toUserResponse()`·세션 관련 함수·login 핸들러는 무변경. `docs/bug-history/` 재확인 결과 **관련 히스토리 없음**(M4/M5 모두 이번 변경의 재발 조건과 무관 — §6 "5차 핫픽스 구현 메모"에 판단 근거 기록) | PRD 2026-10-06 2차 수정(21.1/21.2/21.4/21.6/24.1/24.3/24.4) 구현 완료. curl로 일치/불일치/누락/null/숫자/대소문자/공백/검증순서/서버상태불변/로그인회귀 **10개 케이스** 실행 확인(§5-6). 기존 §2L~§2O의 다른 응답(201 성공 shape, 409, 로그인/로그아웃/me)은 **하나도 바뀌지 않았다** |

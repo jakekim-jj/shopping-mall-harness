@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>하루상점 — 로그인</title>
+  <meta name="description" content="하루상점 로그인 화면입니다.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div class="mark">
+        <a class="mark__home" href="/">
+          <span class="mark__latin">HARU STORE</span>
+        </a>
+        <span class="mark__ko">하루상점 · 매일 쓰는 것들</span>
+      </div>
+      <div class="masthead__aside">
+        <div class="auth-area" data-testid="auth-area">
+          <div class="auth-guest" data-testid="auth-guest" hidden>
+            <a class="auth-link" data-testid="auth-login-link" href="/login.html">로그인</a>
+            <a class="auth-link" data-testid="auth-signup-link" href="/signup.html">회원가입</a>
+          </div>
+          <div class="auth-user" data-testid="auth-user" hidden>
+            <span class="auth-user__email" data-testid="auth-user-email"></span>
+            <button class="auth-logout" type="button" data-testid="auth-logout-button">로그아웃</button>
+          </div>
+        </div>
+        <a class="cart-link" data-testid="cart-link" href="/cart.html">
+          <span class="cart-link__label">장바구니</span>
+          <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shelf">
+    <h1 class="shelf__title">로그인</h1>
+    <p class="backlink"><a href="/">← 판매 중인 상품</a></p>
+
+    <!-- 22.1과 완전히 같은 입력란 2개(이메일/비밀번호)만 만든다 — 비밀번호 확인란은 가입 전용이므로
+         여기에는 만들지 않는다 (D39). "로그인 상태 유지" 체크박스도 만들지 않는다(세션 수명은 서버가
+         7일로 고정, D36). 길이 안내 문구(21.12)는 로그인 화면에는 두지 않는다 — 가입 규칙을 안내하는
+         자리가 아니다. required/pattern 등 HTML5 검증 속성 금지.
+         placeholder="example@email.com"은 검증 속성이 아니라 힌트 텍스트일 뿐이다 (PRD 22.12) — type은
+         그대로 text로 둔다. 비밀번호 입력란에는 placeholder를 두지 않는다. -->
+    <form class="auth-form" id="login-form" data-testid="login-form" novalidate>
+      <div class="field">
+        <label class="field__label" for="login-email">이메일</label>
+        <input class="field__input" type="text" id="login-email" data-testid="login-email" autocomplete="email"
+               placeholder="example@email.com">
+      </div>
+      <div class="field">
+        <label class="field__label" for="login-password">비밀번호</label>
+        <input class="field__input" type="password" id="login-password" data-testid="login-password"
+               autocomplete="current-password">
+      </div>
+
+      <!-- 400·401·5xx·네트워크 오류를 모두 이 하나의 요소로 표시한다 (PRD 22.4/22.5/25.14). -->
+      <div class="alert alert--error" data-testid="login-error" id="login-error" hidden role="alert">
+        <p class="alert__message" id="login-error-message"></p>
+      </div>
+
+      <button class="btn btn--primary" type="submit" data-testid="login-submit" id="login-submit">로그인</button>
+    </form>
+
+    <p class="auth-links">계정이 없으신가요? <a href="/signup.html" data-testid="login-signup-link">회원가입</a></p>
+  </main>
+
+  <footer class="footer">
+    <p>하루상점 — 로그인 화면</p>
+  </footer>
+
+  <script src="/cart-badge.js"></script>
+  <script src="/auth-header.js"></script>
+  <script src="/login.js"></script>
+</body>
+</html>

@@ -1,20 +1,26 @@
 'use strict';
 
 /**
- * 쇼핑몰 서버 (상품 목록 / 상품 상세 / 장바구니 / 모의 결제).
+ * 쇼핑몰 서버 (상품 목록 / 상품 상세 / 장바구니 / 모의 결제 / 회원가입·로그인).
  *
  * PRD(_workspace/01_planner_prd.md) Tech stack 확정값:
  * - Node.js 20+ / Express, 단일 서버 / 단일 포트 3000
  * - public/ 정적 서빙 + 같은 오리진에서 /api/* 제공 (CORS 불필요)
- * - 이번 범위의 API는 GET /api/products + 2차 신규 5개 + 3차 신규 1개 + 4차 신규 2개
- *   = 총 9개 (PRD 18.13)
+ * - 이번 범위의 API는 GET /api/products + 2차 신규 5개 + 3차 신규 1개 + 4차 신규 2개 + 5차 신규 4개
+ *   = 총 13개 (PRD 24.14)
  *   3차 신규: DELETE /api/cart (장바구니 전체 비우기, PRD 13.1)
  *   4차 신규: POST /api/checkout (모의 결제, PRD 18.1), GET /api/orders/:orderId (주문 조회, PRD 18.9)
- *   실제 PG 연동, 주문 목록 조회, 취소/환불 등은 여전히 만들지 않는다 (PRD 18.13).
+ *   5차 신규: POST /api/auth/signup, POST /api/auth/login, POST /api/auth/logout, GET /api/auth/me (PRD 24장)
+ *   실제 PG 연동, 주문 목록 조회, 취소/환불, DB, 소셜 로그인 등은 여전히 만들지 않는다 (PRD 24.14).
  * - 3차 사이클: 줄 수량 10개 이상이면 그 줄에 10% 자동 할인 (PRD 12장).
  *   할인 계산은 buildCartSnapshot() 한 곳에서만 한다 (PRD 3차 스택 보강).
  * - 4차 사이클: 결제 승인/거절은 요청의 paymentMethod 값만으로 결정론적으로 판정한다.
  *   Math.random()/시각/금액을 판정에 쓰지 않는다 (PRD 18.3 / D17).
+ * - 5차 사이클: 회원가입/로그인/로그아웃은 DB 없는 인메모리 Map + crypto.scrypt 해시로 구현한다
+ *   (PRD D26~D30). **`cartId`와 `sessionId`는 완전히 독립이다** — `/api/auth/*`는
+ *   `ensureCartId()`를 호출하지 않고, 기존 9개 엔드포인트는 `sessionId`를 읽지 않는다 (PRD D27 / 24.13).
+ *   이 분리가 docs/bug-history/2026-08-08_cart-session-race-condition.md(M4) 재발을 막는
+ *   유일한 근거다 — cartId를 발급하는 코드 경로가 끝까지 하나뿐이어야 한다.
  *
  * 응답 shape은 _workspace/02_backend_api-spec.md 에 문서화되어 있다.
  * shape을 바꿔야 하면 문서를 먼저 고치고 frontend-agent에게 알린다.
@@ -672,6 +678,402 @@ app.get('/api/orders/:orderId', (req, res, next) => {
   }
 });
 
+// ===========================================================================
+// 5차 사이클 추가분 — 회원가입 / 로그인 / 로그아웃 (PRD 20~26장)
+//
+// 아래 라우트들도 반드시 "/api 미정의 경로 404 핸들러"보다 위에 있어야 한다.
+//
+// 🔒 쿠키 분리 규칙 (PRD D27 / 24.13, M4 재발 차단의 핵심 근거):
+//   - 이 섹션의 4개 핸들러는 ensureCartId()를 호출하지 않고 cartId 쿠키를 건드리지 않는다.
+//   - 반대로 위의 장바구니/결제/주문 9개 핸들러에는 sessionId라는 문자열이 등장하지 않는다.
+//   두 쿠키가 서로의 코드 경로에 나타나지 않으면, 모든 화면이 로드 시 GET /api/cart와
+//   GET /api/auth/me를 병렬로 호출해도(PRD 20.2/20.9) cartId를 발급하는 경로가 하나뿐이라
+//   M4(쿠키 최초 발급 경쟁 조건, docs/bug-history/2026-08-08_cart-session-race-condition.md)가
+//   성립할 수 없다.
+// ===========================================================================
+
+// --- 인증 상수 (PRD 24.3 / D29 / D35 / D36, 5차 스택 보강) --------------------
+const SESSION_COOKIE_NAME = 'sessionId'; // cartId와 다른 이름. cartId를 재사용하지 않는다 (24.16)
+const SESSION_TTL_SECONDS = Number(process.env.AUTH_SESSION_TTL_SECONDS) || 604800; // 기본 7일.
+// AUTH_SESSION_TTL_SECONDS는 만료 케이스를 재현하기 위한 수단이다 — 인증 우회 백도어가 아니다 (D36).
+
+const PASSWORD_MIN_LENGTH = 4;
+const PASSWORD_MAX_LENGTH = 20;
+const EMAIL_MAX_LENGTH = 254;
+
+// 확정 정규식 (PRD 24.3 코드 블록이 기준). RFC 5322 완전 준수가 목표가 아니라
+// 허용/불허 경계가 유한하고 설명 가능한 것이 목표다.
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
+
+// crypto.scrypt 확정 파라미터 (PRD D29). 새 npm 패키지(bcrypt 등)를 추가하지 않는다.
+const PASSWORD_SALT_BYTES = 16; // randomBytes(16).hex → 32자
+const PASSWORD_HASH_KEYLEN = 64; // scrypt(..., 64).hex → 128자
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
+
+const EMAIL_FORMAT_ERROR = '이메일 형식이 올바르지 않습니다.';
+const EMAIL_LENGTH_ERROR = '이메일은 254자 이하로 입력해 주세요.';
+const PASSWORD_LENGTH_ERROR = `비밀번호는 ${PASSWORD_MIN_LENGTH}자 이상 ${PASSWORD_MAX_LENGTH}자 이하로 입력해 주세요.`;
+const EMAIL_DUPLICATE_ERROR = '이미 가입된 이메일입니다.';
+// passwordConfirm 불일치 전용 메시지 (PRD D39 / 24.1 / 24.3, 2026-10-06 추가).
+// 누락/null/문자열 아님/빈 문자열도 전부 이 메시지로 수렴한다 — 사유별로 메시지를 나누지 않는다.
+const PASSWORD_MISMATCH_ERROR = '비밀번호가 일치하지 않습니다.';
+// 존재하지 않는 이메일과 틀린 비밀번호를 구별 불가능하게 만드는 단일 메시지 (D34 / 24.7).
+const LOGIN_CREDENTIALS_ERROR = '이메일 또는 비밀번호가 올바르지 않습니다.';
+const LOGIN_REQUIRED_ERROR = '로그인이 필요합니다.';
+
+/**
+ * 회원 저장소 — Map<normalizedEmail, User>.
+ * 세션 저장소 — Map<sessionId, Session>.
+ *
+ * PRD D28: 서버 프로세스 메모리에만 보관한다. DB·파일 영속화 없음.
+ * 서버를 재시작하면 회원·세션이 전부 사라져도 되며 그것은 버그가 아니다 — 오히려
+ * qa-agent가 "세션을 결정론적으로 무효화하는 수단"으로 재시작을 쓴다 (26장 C7).
+ *
+ * User 레코드는 정확히 4필드다: email, passwordHash, passwordSalt, createdAt (D32).
+ * Session 레코드는 email(주인) / createdAt / expiresAt 3필드다. sessionId는 필드가 아니라
+ * Map의 키다 — 응답에 절대 나가지 않기 때문에 레코드 안에 둘 이유가 없다.
+ */
+const users = new Map();
+const sessions = new Map();
+
+// 회원이 없을 때도 해시 계산을 한 번 거치기 위한 더미 salt (PRD 24.7 구현 힌트 —
+// 응답 시간 차이로 "이 이메일이 가입되어 있는가"가 드러나지 않게 한다). 필수 요구사항은
+// 아니지만 비용이 거의 없으므로 반영한다.
+const DUMMY_PASSWORD_SALT = crypto.randomBytes(PASSWORD_SALT_BYTES).toString('hex');
+
+/**
+ * email/password의 "형식"만 검증한다 (PRD 24.3 / 24.8 — signup·login이 완전히 같은 규칙을 쓴다).
+ * 검증 순서는 email → password로 고정한다. 틀린 게 여러 개여도 메시지가 하나로 고정되어야
+ * 테스트가 flaky하지 않다 (24.3 "둘 다 틀렸으면 email 메시지가 나간다").
+ *
+ * 반환: 에러 메시지 문자열(400으로 보낼 것) 또는 통과 시 null.
+ */
+function validateAuthCredentialsFormat(email, password) {
+  if (typeof email !== 'string') {
+    return EMAIL_FORMAT_ERROR;
+  }
+  const trimmedEmail = email.trim();
+  if (trimmedEmail.length === 0 || !EMAIL_PATTERN.test(trimmedEmail)) {
+    return EMAIL_FORMAT_ERROR;
+  }
+  if (trimmedEmail.length > EMAIL_MAX_LENGTH) {
+    return EMAIL_LENGTH_ERROR;
+  }
+  // ⚠️ 비밀번호는 trim하지 않는다 — 원본 길이로만 검사한다 (D35). 공백 4자는 유효하다 (26장 A11).
+  if (typeof password !== 'string' || password.length < PASSWORD_MIN_LENGTH || password.length > PASSWORD_MAX_LENGTH) {
+    return PASSWORD_LENGTH_ERROR;
+  }
+  return null;
+}
+
+/** 이메일을 계정 정체성 형태로 정규화한다 — trim + 소문자 (PRD D33). */
+function normalizeEmail(email) {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * 평문 비밀번호를 scrypt로 해시한다 (PRD D29). 호출 지점은 signup 하나뿐이다 —
+ * crypto 해시 호출이 이 함수와 verifyPassword() 밖에 나타나지 않게 한다 (5차 스택 보강).
+ */
+function hashPassword(plainPassword) {
+  const passwordSalt = crypto.randomBytes(PASSWORD_SALT_BYTES).toString('hex');
+  const passwordHash = crypto
+    .scryptSync(plainPassword, passwordSalt, PASSWORD_HASH_KEYLEN, SCRYPT_PARAMS)
+    .toString('hex');
+  return { passwordSalt, passwordHash };
+}
+
+/**
+ * 평문 비밀번호가 저장된 User의 해시와 일치하는지 검사한다.
+ * 타이밍 공격 방지를 위해 crypto.timingSafeEqual을 쓴다 (D29) — === 문자열 비교를 쓰지 않는다.
+ */
+function verifyPassword(plainPassword, user) {
+  const candidateHash = crypto.scryptSync(
+    plainPassword,
+    user.passwordSalt,
+    PASSWORD_HASH_KEYLEN,
+    SCRYPT_PARAMS
+  );
+  const storedHash = Buffer.from(user.passwordHash, 'hex');
+  if (candidateHash.length !== storedHash.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(candidateHash, storedHash);
+}
+
+/**
+ * User 레코드를 응답용으로 변환하는 유일한 지점 (PRD D30 / 24.19).
+ * signup·login·me 3개 응답이 전부 이 함수만 거친다 — 엔드포인트마다 객체를 직접
+ * 조립하면 그중 하나에서 passwordHash/passwordSalt가 새어나간다.
+ * 키는 정확히 email, createdAt 2개다.
+ */
+function toUserResponse(user) {
+  return { email: user.email, createdAt: user.createdAt };
+}
+
+/** Set-Cookie로 새 세션 쿠키를 발급한다 (PRD 24.16). */
+function setSessionCookie(res, sessionId) {
+  res.append(
+    'Set-Cookie',
+    `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`
+  );
+}
+
+/** Set-Cookie로 세션 쿠키를 폐기한다 (Max-Age=0) — 로그아웃 성공, 무효/만료 세션 응답에 싣는다 (D36). */
+function clearSessionCookie(res) {
+  res.append('Set-Cookie', `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+/**
+ * 새 세션을 발급해 저장소에 등록한다. sessionId는 필드가 아니라 Map 키이므로
+ * 반환값은 sessionId 문자열 하나뿐이다.
+ */
+function createSession(email) {
+  const sessionId = crypto.randomUUID();
+  sessions.set(sessionId, {
+    email,
+    createdAt: new Date().toISOString(),
+    expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000,
+  });
+  return sessionId;
+}
+
+/**
+ * 요청의 sessionId 쿠키를 "부작용 없이" 조회한다 (쿠키 Set-Cookie 여부는 호출자가 결정한다 —
+ * logout과 me가 "쿠키를 폐기할지"를 서로 다른 조건으로 판단하기 때문이다. 24.10 vs 24.11).
+ * 쿠키 파싱 → Map 조회 → expiresAt 검사까지 하고, 무효/만료였다면 Map에서는 지운다
+ * (세션 레코드 정리는 두 엔드포인트가 공통으로 원하는 동작이다 — D36 lazy 정리).
+ *
+ * ⚠️ 이 함수는 ensureCartId()와 짝이 아니다 — 쿠키가 없을 때 새로 발급하지 않는다.
+ * sessionId는 로그인 성공 시에만 발급된다 (24.16).
+ *
+ * 반환: { sessionId, session, hadCookie }
+ *   - hadCookie=false: 쿠키 자체가 없었다. sessionId/session 모두 null.
+ *   - hadCookie=true, session=null: 쿠키는 있었지만 Map에 없거나(위조/재시작) 만료됐다
+ *     (이미 Map에서 삭제했다).
+ *   - session이 있으면: 유효한 세션.
+ */
+function findSession(req) {
+  const sessionId = parseCookies(req.headers.cookie)[SESSION_COOKIE_NAME];
+  if (!sessionId) {
+    return { sessionId: null, session: null, hadCookie: false };
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session || Date.now() > session.expiresAt) {
+    sessions.delete(sessionId);
+    return { sessionId, session: null, hadCookie: true };
+  }
+
+  return { sessionId, session, hadCookie: true };
+}
+
+/**
+ * GET /api/auth/me가 쓰는 조회 함수. 유효하면 { sessionId, session }, 아니면 null.
+ * 쿠키가 있었지만 무효/만료였던 경우에만 쿠키 폐기를 싣는다 — 쿠키가 아예 없었다면
+ * 지울 것이 없으므로 Set-Cookie를 보내지 않는다 (24.11 / C10).
+ */
+function resolveSession(req, res) {
+  const found = findSession(req);
+  if (!found.session) {
+    if (found.hadCookie) {
+      clearSessionCookie(res);
+    }
+    return null;
+  }
+  return { sessionId: found.sessionId, session: found.session };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/signup — 회원가입 (PRD 24.1~24.4, 2026-10-06 D39 개정)
+//
+// body: { "email": string, "password": string, "passwordConfirm": string }  3필드.
+//       그 외 필드는 전부 무시한다 (24.1).
+// 201: { "user": { "email", "createdAt" } }  — Set-Cookie 없음 (가입은 자동 로그인이 아니다, D31)
+// 400: { "error": { "message": "..." } }  — 검증 순서: email 형식/길이 → password 길이 →
+//      passwordConfirm 일치 (D39 / 24.3). 셋 다 같은 400 shape이며, 가장 먼저 걸린 것의
+//      메시지만 나간다.
+// 409: { "error": { "message": "이미 가입된 이메일입니다." } }  — 정규화된 이메일 기준 중복 (D33)
+//      * 409일 때 비밀번호 해시를 계산하지 않고 기존 계정을 덮어쓰지 않는다 (24.4 마지막 항).
+//      * passwordConfirm 불일치(400)는 중복 검사(409)보다 먼저 검사한다 — 이미 가입된
+//        이메일 + 불일치 비밀번호는 400이 나가고 409는 나가지 않는다 (24.3/24.4, 26장 A25).
+//
+// passwordConfirm은 password와 "원본 문자열 엄격 비교"만 한다 — trim·대소문자 변환 없음
+// (D35). 누락/null/문자열 아님/빈 문자열은 전부 불일치로 취급한다 (24.1). 저장하지 않고
+// 응답에도 나가지 않는다 — User는 4필드(email/passwordHash/passwordSalt/createdAt) 그대로
+// (D32). 불일치로 400이 나갈 때는 해시 계산도, 계정 생성도, 기존 계정 변경도 하지 않는다 —
+// 이 지점 이전에는 서버 상태(users Map)를 전혀 건드리지 않는다 (24.3 마지막 항).
+//
+// ⚠️ ensureCartId()를 호출하지 않는다 — cartId 쿠키를 전혀 건드리지 않는다 (24.13 / D27).
+// ---------------------------------------------------------------------------
+app.post('/api/auth/signup', (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const { email, password, passwordConfirm } = body;
+
+    const formatError = validateAuthCredentialsFormat(email, password);
+    if (formatError) {
+      sendError(res, 400, formatError);
+      return;
+    }
+
+    // passwordConfirm 일치 검증 (D39) — 길이 검사 다음, 중복(409) 검사 이전 (24.3).
+    // 엄격 비교(===)만 한다: trim/대소문자 변환 없음 (D35). 문자열이 아니거나 누락/null이면
+    // password와 같을 수 없으므로 자연히 불일치로 처리된다 — 별도 타입 분기를 두지 않는다.
+    if (passwordConfirm !== password) {
+      sendError(res, 400, PASSWORD_MISMATCH_ERROR);
+      return;
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    if (users.has(normalizedEmail)) {
+      // 중복 — 비밀번호 해시를 계산하지 않는다. 기존 계정은 그대로 둔다 (24.4).
+      sendError(res, 409, EMAIL_DUPLICATE_ERROR);
+      return;
+    }
+
+    const { passwordSalt, passwordHash } = hashPassword(password);
+    const user = {
+      email: normalizedEmail,
+      passwordHash,
+      passwordSalt,
+      createdAt: new Date().toISOString(),
+    };
+    users.set(normalizedEmail, user);
+
+    res.status(201).json({ user: toUserResponse(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/login — 로그인 (PRD 24.5~24.9)
+//
+// body: { "email": string, "password": string }
+// 200: { "user": { "email", "createdAt" } } + Set-Cookie: sessionId=... (24.16)
+// 400: 형식 검증 실패 — email → password 순서, 24.3과 동일한 메시지 (24.8, 401보다 먼저 검사)
+// 401: { "error": { "message": "이메일 또는 비밀번호가 올바르지 않습니다." } }
+//      * 이메일 없음 / 비밀번호 불일치 — 두 경우를 완전히 동일하게 (D34, user enumeration 방지)
+//
+// 요청에 유효하든 무효하든 sessionId 쿠키가 실려 있으면 그 세션을 Map에서 지우고 새로
+// 발급한다 (24.9 — 같은 브라우저 재로그인 시 고아 세션을 남기지 않는다, D37).
+// ⚠️ ensureCartId()를 호출하지 않는다 (24.13 / D27).
+// ---------------------------------------------------------------------------
+app.post('/api/auth/login', (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const { email, password } = body;
+
+    const formatError = validateAuthCredentialsFormat(email, password);
+    if (formatError) {
+      sendError(res, 400, formatError);
+      return;
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    const user = users.get(normalizedEmail);
+
+    let passwordMatches = false;
+    if (user) {
+      passwordMatches = verifyPassword(password, user);
+    } else {
+      // 회원이 없어도 더미 salt로 해시를 한 번 계산해 응답 시간 차이를 줄인다 (24.7 구현 힌트).
+      crypto.scryptSync(password, DUMMY_PASSWORD_SALT, PASSWORD_HASH_KEYLEN, SCRYPT_PARAMS);
+    }
+
+    if (!user || !passwordMatches) {
+      sendError(res, 401, LOGIN_CREDENTIALS_ERROR);
+      return;
+    }
+
+    // 같은 브라우저의 기존 세션을 교체한다 (24.9). 유효성과 무관하게 해당 sessionId만
+    // Map에서 지운다 — 없는 키를 지우는 것은 no-op이라 안전하다. 다른 브라우저의
+    // 세션(다른 sessionId)은 건드리지 않는다 (23.8).
+    const existingSessionId = parseCookies(req.headers.cookie)[SESSION_COOKIE_NAME];
+    if (existingSessionId) {
+      sessions.delete(existingSessionId);
+    }
+
+    const sessionId = createSession(normalizedEmail);
+    setSessionCookie(res, sessionId);
+
+    res.status(200).json({ user: toUserResponse(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/logout — 로그아웃 (PRD 24.10)
+//
+// body 없음.
+// 200: { "user": null } + Set-Cookie: sessionId=;...;Max-Age=0  — 세션을 Map에서 삭제
+// 401: { "error": { "message": "로그인이 필요합니다." } } + 같은 쿠키 폐기 헤더
+//      * 쿠키 없음 / Map에 없음(위조·재시작) / 만료 — 세 경우 모두 401 (D36)
+//      * 멱등하지 않다 — 연속 두 번 호출하면 200 → 401 (의도된 동작, 18.16과 같은 패턴)
+//
+// ⚠️ ensureCartId()를 호출하지 않는다 (24.13 / D27). 이번 사이클에 로그인을 요구하는
+// 유일한 엔드포인트다 (24.12).
+// ---------------------------------------------------------------------------
+app.post('/api/auth/logout', (req, res, next) => {
+  try {
+    const found = findSession(req);
+
+    // 쿠키 없음 / Map에 없음(위조·재시작) / 만료 — 세 경우 모두 401 + 쿠키 폐기 (D36).
+    // me와 달리 "쿠키가 아예 없었어도" 폐기 헤더를 싣는다 — logout은 상태 조회가 아니라
+    // "세션을 변경하는 조작"이므로 실패해도 결과(로그인 아님)를 쿠키로 확정해준다.
+    if (!found.session) {
+      clearSessionCookie(res);
+      sendError(res, 401, LOGIN_REQUIRED_ERROR);
+      return;
+    }
+
+    sessions.delete(found.sessionId);
+    clearSessionCookie(res);
+
+    res.status(200).json({ user: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/auth/me — 현재 로그인 상태 조회 (PRD 24.11)
+//
+// 항상 200. 401을 절대 반환하지 않는다 (D36 — 상태 조회는 에러가 아니다).
+// 200: 로그인 상태 → { "user": { "email", "createdAt" } }
+// 200: 비로그인/무효/만료 → { "user": null }  (user 키는 항상 존재, 생략·{} 금지)
+//
+// 무효·만료 세션이었을 때만 Map에서 삭제 + 쿠키 폐기를 싣는다. 쿠키가 아예 없었으면
+// Set-Cookie를 싣지 않는다 (지울 게 없음 — C10). 슬라이딩 만료를 하지 않는다 — 이
+// 호출이 expiresAt을 갱신하지 않는다 (24.11 / C11).
+// ⚠️ ensureCartId()를 호출하지 않는다 (24.13 / D27).
+// ---------------------------------------------------------------------------
+app.get('/api/auth/me', (req, res, next) => {
+  try {
+    const resolved = resolveSession(req, res);
+    if (!resolved) {
+      res.status(200).json({ user: null });
+      return;
+    }
+
+    const user = users.get(resolved.session.email);
+    if (!user) {
+      // 세션은 유효했지만 회원이 사라진 방어적 경우(이번 범위에는 탈퇴가 없어 정상적으로는
+      // 발생하지 않는다) — 비로그인과 동일하게 처리한다.
+      sessions.delete(resolved.sessionId);
+      clearSessionCookie(res);
+      res.status(200).json({ user: null });
+      return;
+    }
+
+    res.status(200).json({ user: toUserResponse(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // /api/* 미정의 경로 — 이번 범위 밖 엔드포인트는 존재하지 않음을 JSON으로 알린다.
 // ---------------------------------------------------------------------------
@@ -694,6 +1096,10 @@ app.use('/api', (req, res) => {
 // 4차 추가: PRD 18.12가 결제 API를 이름으로 지목해 M5 재발을 예고했다. /api/checkout,
 // /api/orders도 분기를 추가하지 않으면 결제 실패 화면에 "상품 목록을 불러오지 못했습니다."가
 // 그대로 뜬다 — 그래서 두 분기를 추가한다 (18.12 권장 문구 그대로).
+//
+// 5차 추가: PRD 24.17이 같은 패턴을 다시 예고했다 — 분기를 추가하지 않으면 로그인/가입
+// 실패 화면에도 "상품 목록을 불러오지 못했습니다."가 뜬다. 새 핸들러를 만들지 않고
+// 기존 4개 분기에 5번째로 이어 붙인다.
 // ---------------------------------------------------------------------------
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
@@ -714,6 +1120,8 @@ app.use((err, req, res, next) => {
       message = '결제 요청을 처리하지 못했습니다.';
     } else if (req.path.startsWith('/api/orders')) {
       message = '주문 정보를 불러오지 못했습니다.';
+    } else if (req.path.startsWith('/api/auth')) {
+      message = '인증 요청을 처리하지 못했습니다.';
     }
     res.status(500).json({ error: { message } });
     return;

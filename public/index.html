@@ -16,6 +16,16 @@
       </div>
       <div class="masthead__aside">
         <p class="masthead__count" id="product-count">상품을 불러오는 중</p>
+        <div class="auth-area" data-testid="auth-area">
+          <div class="auth-guest" data-testid="auth-guest" hidden>
+            <a class="auth-link" data-testid="auth-login-link" href="/login.html">로그인</a>
+            <a class="auth-link" data-testid="auth-signup-link" href="/signup.html">회원가입</a>
+          </div>
+          <div class="auth-user" data-testid="auth-user" hidden>
+            <span class="auth-user__email" data-testid="auth-user-email"></span>
+            <button class="auth-logout" type="button" data-testid="auth-logout-button">로그아웃</button>
+          </div>
+        </div>
         <a class="cart-link" data-testid="cart-link" href="/cart.html">
           <span class="cart-link__label">장바구니</span>
           <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
@@ -58,6 +68,7 @@
   </footer>
 
   <script src="/cart-badge.js"></script>
+  <script src="/auth-header.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

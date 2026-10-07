@@ -716,6 +716,135 @@ API 스펙 §2J(`POST /api/checkout`)·§2K(`GET /api/orders/:orderId`)에 적�
 
 이번 사이클은 PRD 16~19장이 선택지를 남기지 않을 정도로 촘촘했다(입력란 2개, 라디오 2개, 에러 요소 1개, 상태 표시 문구까지 표 형태로 확정). 재량으로 결정해야 했던 것은 **표시 텍스트 형식**(주문 일시 로케일 표기, 수량 표기에 `×` 접두어 추가) 정도이며, 전부 PRD 19.13("표시 텍스트 형식은 frontend-agent 재량")이 이미 허용한 범위 안이라 별도로 문의할 사항이 없다.
 
+# 5차 사이클 — 회원가입 / 로그인 / 공통 헤더 인증 영역 (2026-10-06)
+
+> 1~31절(1~4차)은 그대로 유효하며 재구현 대상이 아니다. 이번에 추가된 것은 **32절 이후**뿐이다.
+
+## 32. 이번 사이클에 만든 것
+
+| 파일 | 내용 |
+|---|---|
+| `public/auth-header.js` (신규) | 7개 화면이 공유하는 **유일한** 인증 영역 모듈. 화면당 `GET /api/auth/me` **정확히 1회** 호출(PRD 20.2/20.9), `auth-guest`/`auth-user` 3상태 토글, 로그아웃 버튼 클릭 핸들러(`POST /api/auth/logout`)까지 전부 이 한 파일에 있다 |
+| `public/signup.html` / `public/signup.js` (신규) | 회원가입 화면(`/signup.html`) — 이메일·비밀번호 2개 입력 + 고정 길이 안내 문구 + `POST /api/auth/signup` |
+| `public/login.html` / `public/login.js` (신규) | 로그인 화면(`/login.html`) — 이메일·비밀번호 2개 입력 + `POST /api/auth/login`, 성공 시 `/`로 이동 |
+| `public/index.html` / `product.html` / `cart.html` / `checkout.html` / `order.html` (수정) | `masthead__aside` 안에 인증 영역 마크업(`auth-area`/`auth-guest`/`auth-user`) 추가, `<script src="/auth-header.js">` 추가. **그 외 한 글자도 바꾸지 않았다** — 기존 `cart-link`/`cart-count`를 비롯한 본문 로직·선택자는 무변경 |
+| `public/styles.css` (수정) | 5차 전용 블록 추가 — `.auth-area`/`.auth-guest`/`.auth-user`/`.auth-link`/`.auth-user__email`/`.auth-logout`(헤더 인증 영역), `.auth-form`/`.field__hint`/`.auth-links`(가입·로그인 폼), `.notice--success`(가입 성공 안내). 입력란·버튼·에러 박스는 결제 화면의 `.field`/`.field__input`/`.btn`/`.btn--primary`/`.alert`를 **그대로 재사용**했다 — 새 입력 스타일을 따로 만들지 않았다 |
+
+기존 9개 API·5개 화면(상품 목록/상세/장바구니/결제/주문 확인)은 **한 글자도 고치지 않았다** — `cart.js`/`checkout.js`/`order.js`/`product.js`/`app.js`/`cart-badge.js`는 전부 무변경이다. 유일한 "기존 파일 변경"은 5개 HTML의 헤더 마크업에 `auth-area` 블록과 스크립트 태그 한 줄을 **추가**한 것뿐이다(기존 줄은 삭제·수정 없음).
+
+## 33. 화면명 — 호출 API — 기대 응답 shape (5차 신규)
+
+### 공통 헤더 인증 영역 (7개 화면 전부 — `auth-header.js`)
+
+- **호출 API**: `GET /api/auth/me` — 화면 로드 시 1회. 성공 시 로그아웃 버튼에 클릭 리스너를 건 뒤 바로 호출한다.
+  로그아웃 버튼 클릭 시 `POST /api/auth/logout` (body 없음).
+- **기대 응답 shape**
+  - `GET /api/auth/me` → **항상 200** → `{ "user": { "email": string, "createdAt": string } }` | `{ "user": null }` — `user` 키는 항상 존재
+  - `POST /api/auth/logout` 200 → `{ "user": null }` (me의 비로그인 응답과 완전히 동일한 shape)
+  - `POST /api/auth/logout` 401 → `{ "error": { "message": "로그인이 필요합니다." } }`
+
+### 회원가입 화면 (`/signup.html`)
+
+- **호출 API**: `POST /api/auth/signup`  body `{ "email": string, "password": string, "passwordConfirm": string }` (**3개 필드** — 2026-10-06 D39 핫픽스로 `passwordConfirm` 추가. 입력란 값을 그대로 세 필드에 싣고, 프론트는 `password`와 `passwordConfirm`을 절대 비교하지 않는다)
+- **기대 응답 shape**
+  - 201 → `{ "user": { "email": "...", "createdAt": "..." } }` — `Set-Cookie` 없음
+  - 400 → `{ "error": { "message": "이메일 형식이 올바르지 않습니다." } }` | `"이메일은 254자 이하로 입력해 주세요."` | `"비밀번호는 4자 이상 20자 이하로 입력해 주세요."` | **`"비밀번호가 일치하지 않습니다."`(신규, D39 — `passwordConfirm` 불일치)**
+  - 409 → `{ "error": { "message": "이미 가입된 이메일입니다." } }`
+
+### 로그인 화면 (`/login.html`)
+
+- **호출 API**: `POST /api/auth/login`  body `{ "email": string, "password": string }`
+- **기대 응답 shape**
+  - 200 → `{ "user": { "email": "...", "createdAt": "..." } }` + `Set-Cookie: sessionId=...`(signup과 `user` shape 완전 동일)
+  - 400 → signup과 동일 3종 메시지(형식 검증이 자격 증명 확인보다 먼저)
+  - 401 → `{ "error": { "message": "이메일 또는 비밀번호가 올바르지 않습니다." } }` — **이메일 없음/비밀번호 불일치 두 경우가 완전히 동일한 응답**
+
+## 34. API shape ↔ 화면 모델 매핑 지점 (5차)
+
+- **헤더 인증 영역**: `auth-header.js`의 `renderFromUserField(user)` 한 곳이 `{ user }` 한 겹을 벗기는 유일한 지점이다. `me`/`logout` 두 엔드포인트의 응답이 `{ "user": {...} } | { "user": null }`로 shape이 완전히 같으므로(PRD 24.10 "같은 렌더 함수로 처리") 같은 함수를 그대로 재사용했다 — `handleLogoutClick()`은 `renderFromUserField`를 부르지 않고 `showGuest()`/상태유지로 직접 분기하는데, 이는 로그아웃의 401(이미 게스트)과 5xx(상태 유지)가 "응답의 user 필드를 그대로 반영"이 아니라 "상태 코드에 따른 정책 분기"이기 때문이다(23.3) — 200만 `{user:null}`이 와서 사실상 `showGuest()`와 같다.
+- **회원가입/로그인**: 두 화면 모두 `readErrorMessage(body)`로 `{ error: { message } }` 한 겹을 벗긴다. 성공 응답(`{ user: {...} }`)은 화면에 뿌릴 필드가 없다(가입은 성공 안내만, 로그인은 즉시 리다이렉트) — 그래서 두 화면 다 `user` 객체 자체를 매핑하는 함수가 없다. 필요해지면(예: 화면에 가입일을 표시하는 요구사항이 생기면) `auth-header.js`의 `renderFromUserField`와 같은 자리에 매핑 함수를 추가하면 된다.
+- 세 화면(헤더/가입/로그인) 모두 `{ error: { message } }`를 처리하는 `readErrorMessage()`를 **각자 파일 안에 독립적으로** 복제해 뒀다(기존 `cart-badge.js`의 동명 함수와 로직은 동일하지만 import할 공유 모듈 경계가 없어서 임포트하지 않았다 — `<script>` 태그 전역 스코프 구조에서 `HaruCart.readErrorMessage`를 재사용할 수도 있었으나, 인증 3개 파일은 장바구니와 무관한 도메인이라 의존성을 새로 만들지 않는 쪽을 택했다. 셋 다 동일한 2줄짜리 순수 함수라 shape이 바뀌면 세 곳을 함께 고쳐야 하는 비용은 낮다고 판단했다).
+
+## 35. 3상태 헤더 — 확정 전 / 게스트 / 로그인 (PRD 20.5) 구현 방식
+
+`auth-guest`/`auth-user` 두 컨테이너는 **HTML 작성 시점부터 둘 다 `hidden` 속성이 붙어 있다** — 이것이 "확정 전" 상태의 기본값이고, 별도의 JS 초기화 없이 정적 HTML만으로 성립한다. `auth-header.js`가 `GET /api/auth/me` 응답을 받은 뒤에야 둘 중 하나의 `hidden`을 해제한다.
+
+| 경로 | 처리 |
+|---|---|
+| 응답 도착, `user` 있음 | `showUser(email)` — `auth-user.hidden = false`, `auth-guest.hidden = true`, 이메일 텍스트 그대로 대입(마스킹 없음) |
+| 응답 도착, `user: null` | `showGuest()` — `auth-guest.hidden = false`, `auth-user.hidden = true` |
+| 응답 5xx/네트워크 오류 | `showUnresolved()` — 둘 다 `hidden = true`로 **명시적으로 재설정**(이미 hidden이지만, 호출 순서에 안전하도록 방어적으로 둠). 화면 본문 렌더링은 각 화면의 자체 스크립트(`app.js` 등)가 독립적으로 진행하므로 여기서 막을 것이 없다 |
+
+두 컨테이너는 **DOM에서 제거/재생성되지 않는다** — `createElement`/`remove()`를 쓰지 않고 처음부터 HTML에 존재하는 두 `<div>`의 `hidden` 속성만 토글한다(PRD 20.5/25.5의 "요소는 항상 DOM에 1개씩 존재" 요구와 일치).
+
+## 36. `checkout-error`식 단일 에러 요소 — `signup-error`/`login-error`
+
+PRD 25.9/25.14가 400·409·5xx·네트워크 오류를 각각 **하나의 요소**로 표시하라고 요구한다. 4차 `checkout-error`와 같은 패턴을 그대로 적용했다 — 상태 코드별 분기 없이 `readErrorMessage(body) || 폴백문구`를 `signup-error-message`/`login-error-message`에 꽂는다. 유일한 차이는 회원가입/로그인에는 402/409 같은 "링크를 추가로 보여줘야 하는" 예외가 없어서(가입의 409는 그냥 메시지만 표시, 체크아웃의 409처럼 상품 목록 링크를 동반하지 않는다) 분기 자체가 필요 없었다는 점이다.
+
+## 37. data-testid (PRD 25.1~25.17)
+
+**공통 헤더(7개 화면)**: `auth-guest`(25.1), `auth-user`(25.2), `auth-login-link`/`auth-signup-link`(25.3, 둘 다 실제 `<a href>`), `auth-user-email`(25.4, `<span>`이며 `<a>` 아님)/`auth-logout-button`(25.4, `<button>`).
+
+**회원가입 화면**: `signup-form`(25.6, 성공 시 hidden), `signup-email`/`signup-password`(25.7), `signup-password-hint`(25.7, 텍스트 `4자 이상 20자 이하로 입력해주세요.` 고정·항상 visible), **`signup-password-confirm`(25.7, 2026-10-06 D39 추가 — `type="password"`, DOM 순서는 `signup-email` → `signup-password` → `signup-password-hint` → `signup-password-confirm`, 별도 helper text 없음)**, `signup-submit`(25.8), `signup-error`(25.9, 신규 400 메시지 `비밀번호가 일치하지 않습니다.`도 이 기존 요소를 그대로 재사용 — 메시지별 분기 없음), `signup-success`(25.10)/`signup-login-link`(25.10).
+
+**로그인 화면**: `login-form`(25.11, 절대 hidden 되지 않음), `login-email`/`login-password`(25.12, **`login-password-confirm`은 존재하지 않는다** — 확인란은 가입 전용, D39), `login-submit`(25.13), `login-error`(25.14), `login-signup-link`(25.15).
+
+모두 "DOM에 남기고 hidden 토글"이며(25.16), 기존 4.x/10.x/14.x/19.x 선택자는 이름·위치·의미를 하나도 바꾸지 않았다(25.17) — 5개 기존 화면의 `cart-link`/`cart-count`가 신규 2개 화면에도 동일하게 존재한다(20.10).
+
+**2026-10-06 핫픽스 추가 — placeholder (21.13/22.12, 25.18)**: `signup-email`·`login-email` 두 입력란 모두 `placeholder="example@email.com"`을 추가했다. **선택자 이름·위치·의미는 바뀌지 않았고**(25.18), placeholder 전용 선택자도 새로 만들지 않았다 — 기존 `signup-email`/`login-email` 요소의 속성 하나만 늘었다. `type`은 여전히 `text`이고 `required`/`pattern`/`type="email"`은 추가하지 않았다(D25 불변). 비밀번호·비밀번호 확인 입력란에는 placeholder를 두지 않았다. qa-agent는 이 속성을 `toHaveAttribute('placeholder', 'example@email.com')`로 단언해야 하며, 초기 `value`는 빈 문자열이다.
+
+## 38. `docs/bug-history/` 확인 결과 (작업 전 RAG)
+
+세 문서를 작업 시작 전에 모두 읽었다. 이번 사이클과의 관계:
+
+| ID | 제목 | 이번 범위 관련성 | 반영/판단 |
+|---|---|---|---|
+| **BUG-2026-08-08-01 (M4)** | 장바구니 쿠키 최초 발급 경쟁 조건 | **가장 직접적 — M4 문서가 "로그인/회원 기능을 나중에 추가해서 '세션 확인'이라는 새 병렬 호출이 생길 때"를 재발 조건으로 정확히 지목했고, 이번이 그 상황이다.** 7개 화면 모두 로드 시 `cart-badge.js`의 `refreshBadge()`(`GET /api/cart`)와 `auth-header.js`의 `loadAuthState()`(`GET /api/auth/me`)가 병렬로 나간다 | `auth-header.js`는 **`cartId`·`document.cookie`·`HaruCart`의 어떤 함수도 호출하지 않는다** — 파일 전체에 `cartId`/`cart`라는 문자열이 등장하지 않는다(주석 제외). `cartId` 발급은 여전히 `cart-badge.js`→`ensureCartId()`(서버) 경로 하나뿐이므로, `GET /api/auth/me`가 아무리 먼저 응답해도 두 번째 발급이 일어날 수 없다. curl로 "쿠키 없는 첫 방문 → 담기 → `GET /api/auth/me` → 로그인 → `GET /api/cart`" 순서를 재현해 `cartId` 쿠키가 로그인 전후로 **값이 그대로임**을 확인했다(§39 참고) |
+| **BUG-2026-08-08-02 (M5)** | 공용 에러 핸들러가 엉뚱한 문구를 내보냄 | **백엔드 조치 확인만 함.** API 스펙 §2L~§2O 공통 규약이 `/api/auth` 분기(`인증 요청을 처리하지 못했습니다.`)를 backend-agent가 이미 추가했다고 명시(§5-5 (7)) | 프론트는 `readErrorMessage()`로 서버 문구를 그대로 표시할 뿐 하드코딩하지 않는다 — 서버가 `/api/auth` 경로에 맞는 문구를 보내는 한 `signup-error`/`login-error`도 정확한 문구를 보여준다. 네트워크 오류 폴백 문구(`"회원가입/로그인 요청을 처리하지 못했습니다..."`)도 화면 문맥에 맞게 따로 썼다 |
+| **BUG-2026-08-NOTES (M1/M2/M3)** | 경미 기록 | **M1과 M2 둘 다 직접 관련.** M1: 백엔드가 상황별로 다른 메시지를 보내면 프론트도 그걸 노출해야 한다 — 가입·로그인 실패 메시지가 이번에 5종류로 늘었다. M2: "DOM 존재 vs 지금 보이는지" 구분 — 3상태 헤더가 이 구분이 가장 크게 걸리는 지점이다 | M1: `signup-error`/`login-error`가 **서버 메시지를 하드코딩 없이 그대로** 표시한다(21.5/22.5) — `readErrorMessage(result.body) || 폴백` 패턴으로, 서버가 어떤 문구를 보내든 화면에 그대로 반영된다. M2: 25.5 표대로 `auth-guest`/`auth-user`를 **"존재+hidden 토글"**로 구현했고(§35), qa-agent가 `toBeVisible()`/`toBeHidden()`으로 단언해야지 `toHaveCount()`로 단언하면 안 된다는 점을 이 문서(§35)에 그대로 적어뒀다 |
+
+## 39. 확인/미확인 사항
+
+### 확인함 (curl 통합 테스트 + Chrome 실브라우저 확인)
+
+서버를 띄우고(`PORT=3777 node server.js`) 쿠키 항아리를 유지하며 프론트 코드가 실제로 보내는 요청과 동일한 흐름을 재현했다.
+
+| 시나리오 | 결과 |
+|---|---|
+| `GET /api/auth/me` (쿠키 없는 첫 방문) | `200` + `{"user":null}` |
+| `POST /api/auth/signup` (정상 이메일 trim+대문자 포함) | `201` + 정규화된 소문자 이메일(`hong@example.com`) 확인 |
+| 같은 이메일 대소문자·공백만 다르게 재가입 | `409` + `이미 가입된 이메일입니다.` |
+| 잘못된 비밀번호 로그인 vs 존재하지 않는 이메일 로그인 | **두 응답이 상태 코드(401)·메시지·body 전부 동일**함을 직접 비교해 확인 (D34) |
+| 로그인 성공 | `200` + `Set-Cookie: sessionId=...; HttpOnly; SameSite=Lax; Max-Age=604800`(`Secure` 없음) |
+| **D27/M4 핵심 시나리오**: 쿠키 없는 상태 → 장바구니 담기(`cartId` 발급) → `GET /api/auth/me` 호출 → 로그인(`sessionId` 발급) → `GET /api/cart` 재조회 → 로그아웃 → `GET /api/cart` 재조회 | **`cartId` 값이 처음 발급된 값 그대로 끝까지 유지**되고, 장바구니 내용(`p1` × 2, `totalPrice` 38,000원)이 로그인 전·후·로그아웃 후 **완전히 동일**함을 쿠키 파일과 응답 body로 직접 비교 확인 |
+| 로그아웃 성공 | `200` + `{"user":null}` + `Set-Cookie: sessionId=; Max-Age=0`, 쿠키 파일에서 `sessionId` 소멸·`cartId`는 그대로 남음을 확인 |
+| 정적 서빙 | `signup.html`/`login.html`/`auth-header.js`/`signup.js`/`login.js` 전부 `200` |
+| `auth-header.js`/`signup.js`/`login.js` | `node --check`로 문법 오류 없음 확인 |
+| **Chrome 실브라우저(claude-in-chrome)로 실제 렌더/이벤트 확인** | ① `/signup.html` 최초 로드 시 헤더가 게스트 상태(`로그인`/`회원가입` 링크)로 뜨고 `signup-password-hint`가 고정 문구로 항상 보임 ② 실제 `requestSubmit()`으로 가입 성공 → `signup-form` hidden, `signup-success` visible, **헤더는 그대로 게스트 상태 유지**(자동 로그인 안 됨, 스크린샷으로 확인) ③ `/login.html`에서 틀린 비밀번호 제출 → `login-error`에 정확한 메시지, **이메일은 유지되고 비밀번호 입력란은 길이 0으로 비워짐** ④ 올바른 비밀번호로 재제출 → `/`로 리다이렉트되고 헤더가 로그인 상태(이메일 전체 텍스트 `browsertest@example.com` + `로그아웃` 버튼)로 전환 ⑤ 로그아웃 버튼 클릭 → **페이지 이동 없이** 헤더만 게스트 상태로 즉시 전환 |
+| **회귀 — 기존 Playwright 84개 전수 실행** (`npx playwright test`) | **84개 전부 통과**(7.6초) — 헤더에 인증 영역이 추가됐을 뿐 기존 5개 화면의 선택자·동작은 하나도 깨지지 않았다(PRD D1/20.7) |
+
+### 아직 확인 못 한 것 (⚠️ qa-agent의 추가 검증 권장)
+
+- **C2~C11의 세션 무효·만료·위조 케이스**(위조 `sessionId` 주입, 서버 재시작, `AUTH_SESSION_TTL_SECONDS` 짧게 설정) — Playwright `context.addCookies()` 등 전용 도구가 필요한 시나리오라 이번 curl/브라우저 수동 확인 범위에서는 다루지 않았다. `auth-header.js`의 `loadAuthState()`/`handleLogoutClick()` 코드 경로는 `{user:null}`/401 두 응답만 보고 분기하므로 서버가 §5-5에서 검증한 세 가지 무효 케이스(위조/재시작/만료) 모두 결과적으로 같은 코드 경로(`showGuest`/`showUnresolved`)를 타지만, 실제 Playwright 테스트로 셋을 각각 재현해 확인하는 일은 qa-agent 몫으로 남긴다
+- **C12 / D5 — 두 브라우저 컨텍스트에서의 동시 세션·장바구니 격리**: curl 쿠키 항아리 하나로는 "다른 브라우저"를 재현할 수 없어 코드 리뷰(헤더가 쿠키별로 완전히 독립적으로 동작하도록 짜여 있음)로만 확인했다. Playwright의 다중 `BrowserContext`로 실제 검증 필요
+- **C15 — 로그아웃이 5xx/네트워크 오류일 때 실제 브라우저에서 헤더가 로그인 상태로 유지되는지**: 코드상 분기는 있으나(§39 표의 "else" 분기), 실제로 서버 500을 재현해 브라우저로 확인하지는 못했다(서버에 로그아웃 전용 장애 주입 훅이 없음)
+- **375px 모바일 폭에서 `.auth-area`/`.auth-form`의 실제 레이아웃**(헤더가 `auth-guest`/`cart-link` 두 블록으로 좁은 화면에서 줄바꿈되는지)
+
+## 40. backend-agent에게 — 계약 불일치 없음
+
+API 스펙 §2L~§2O(`POST /api/auth/signup`·`/login`·`/logout`, `GET /api/auth/me`)에 적힌 shape·상태 코드가 **실제 curl 응답과 전부 일치했다.**
+
+- `user` 응답 필드가 정확히 `email`/`createdAt` 2개 — `password`/`passwordHash`/`passwordSalt`/`id` 없음 확인
+- signup(201)/login(200)/me(200)의 `user` shape이 완전히 동일해서 **세 응답을 같은 `renderFromUserField()` 함수로 처리**할 수 있었다(실제로 그렇게 구현)
+- login 401의 "이메일 없음"과 "비밀번호 불일치" 두 케이스가 **정말로 구별 불가능한 동일 응답**임을 직접 비교해 확인 — 프론트가 메시지를 나눠 보여줄 여지 자체가 없었다
+- `cartId`/`sessionId` 완전 독립 — curl로 재현한 "담기 → me → 로그인 → cart 재조회 → 로그아웃 → cart 재조회" 전 과정에서 `cartId` 값이 단 한 번도 바뀌지 않음을 직접 확인
+
+**추측으로 채운 필드 없음. 회신할 불일치 없음.**
+
+## 41. product-planner에게 — 확인 필요한 프론트 재량 사항 없음
+
+PRD 20~26장이 선택자 이름·메시지 문구·상태 전환 규칙까지 전부 표로 확정해 뒀다(26장 경계 조건 매트릭스가 사실상 구현 체크리스트 역할을 했다). frontend-agent가 재량으로 결정한 것은 **인증 영역을 `masthead__aside` 안에서 어느 순서로 배치할지**(cart-link보다 앞쪽에 둠 — PRD는 순서를 지정하지 않았다) 정도이며, 선택자·동작에 영향을 주지 않는 시각적 배치라 별도 문의 없이 진행했다.
+
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 사유 |
@@ -724,3 +853,5 @@ API 스펙 §2J(`POST /api/checkout`)·§2K(`GET /api/orders/:orderId`)에 적�
 | 2026-08-08 | **2차 사이클 추가(7~14절)** — 상품 상세(`product.html`)·장바구니(`cart.html`) 화면 신규 구현, 목록 카드 링크화 + 공통 헤더 배지 추가, 공용 모듈 `cart-badge.js` 분리. 1~6절(1차 목록 화면 명세)은 그대로 두고 아래에 덧붙임 | PRD 5~10장 / API 스펙 §2A~§2G 구현 |
 | 2026-08-09 | **3차 사이클 추가(15~22절)** — 장바구니 화면에 ① 전체 비우기 버튼(`cart-clear`, `DELETE /api/cart` 1회, 확인 다이얼로그 없음) ② 줄 단위 할인 표시(원가 취소선 + `cart-item-discounted-price` + `cart-item-discount-notice`, 판정은 `discountApplied` 하나) 추가. `cart-badge.js`에 `clearCart()`와 할인 필드 5개 매핑 추가. **`cart-item-total`/`cart-total-price`를 그리는 코드는 의도적으로 무변경** — `lineTotal`의 의미만 바뀌었고 참조 필드는 그대로이므로 서버 값이 바뀌는 즉시 할인 금액이 자동 반영된다. 1~14절은 그대로 두고 아래에 덧붙임 | PRD 11~14장 / API 스펙 §2H·§2I 구현. 실서버 대상 DOM 스텁 검증 77개 항목 전부 통과(19절), `docs/bug-history/` M4·M5·M2 확인 결과는 20절 |
 | 2026-08-10 | **4차 사이클 추가(23~31절)** — 결제 화면(`checkout.html`/`checkout.js`) 신규: 주문 요약(읽기 전용, `GET /api/cart` 1회로 요약+배지 동시 채움) + 주문자 정보 2개 + 모의 결제 라디오 2개 + `POST /api/checkout`. 주문 확인 화면(`order.html`/`order.js`) 신규: `GET /api/orders/:orderId` 조회, 404 통합 처리(없는 주문/남의 주문/쿠키 없음 동일). 장바구니 화면에 `checkout-link` 추가(결제 진입점은 장바구니 화면에만 존재). `cart-badge.js`에 `mapLineItem` 공개 — 주문 확인 화면이 CartItem 매핑을 재사용. `checkout-error` 단일 요소로 400/402/409/5xx/네트워크 5종 실패를 모두 표시(409만 상품 목록 링크 동반). 1~22절(1~3차)은 그대로 두고 아래에 덧붙임 | PRD 15~19장 / API 스펙 §2J·§2K 구현. curl 통합 테스트로 200/402/409/404(남의 주문) 전 경로 확인(29절), `docs/bug-history/` M4(결제 화면 이름으로 지목된 재발 지점)·M5·M2 확인 결과는 28절 |
+| 2026-10-06 | **5차 사이클 추가(32~41절)** — 공용 모듈 `auth-header.js` 신규: 7개 화면이 공유하는 **유일한** 인증 영역 로직, 화면당 `GET /api/auth/me` 정확히 1회(M4 재발 차단의 핵심 — `cartId`/`HaruCart`를 전혀 건드리지 않음), `auth-guest`/`auth-user` 3상태(확정 전/게스트/로그인) 토글, 로그아웃 버튼 핸들러. 회원가입 화면(`signup.html`/`signup.js`) 신규: 이메일·비밀번호 2입력 + 고정 길이 안내 문구 + `POST /api/auth/signup`, 성공해도 화면 이동 없이 폼을 숨기고 로그인 링크만 노출(자동 로그인 아님). 로그인 화면(`login.html`/`login.js`) 신규: `POST /api/auth/login`, 성공 시 `/`로 이동·실패 시 이메일 유지+비밀번호만 초기화(가입 화면과 정반대 규칙). 기존 5개 화면의 헤더에 `auth-area` 마크업과 스크립트 태그 한 줄만 **추가**(본문 로직 무변경). 1~31절(1~4차)은 그대로 두고 아래에 덧붙임 | PRD 20~26장 / API 스펙 §2L~§2O 구현. curl로 D27(cartId/sessionId 완전 독립) 전 과정 직접 재현·확인, Chrome 실브라우저로 가입→로그인→헤더 전환→로그아웃 전체 플로우 확인, 기존 Playwright 84개 전수 재실행해 전부 통과 확인(39절), `docs/bug-history/` M4(이번 사이클을 이름으로 지목한 재발 조건)·M5·M1/M2 확인 결과는 38절 |
+| 2026-10-06 (핫픽스) | **5차 사이클 내 사용자 피드백 반영 (D39 — `passwordConfirm` 추가 / placeholder 추가)** — `signup.html`에 `data-testid="signup-password-confirm"`(`type="password"`) 입력란을 `signup-password-hint`와 `signup-password` 사이가 아니라 **그 뒤**(DOM 순서: email→password→hint→password-confirm)에 추가, 별도 helper text 없음. `signup.js`는 `password`/`passwordConfirm` 두 값을 비교하지 않고 그대로 `POST /api/auth/signup` body 3필드에 실어 보내도록 1줄 추가(`payload.passwordConfirm = el.passwordConfirm.value`) — 비교 분기·실시간 일치 표시·버튼 비활성화는 전혀 추가하지 않았다. 새 400 메시지(`비밀번호가 일치하지 않습니다.`)는 기존 `signup-error` 요소·`readErrorMessage()`/`showError()` 경로를 그대로 재사용(메시지별 분기 코드 추가 없음). 실패 시 이메일·비밀번호·비밀번호 확인 3개 입력값 모두 유지(기존 코드가 애초에 어떤 입력값도 지우지 않으므로 추가 수정 불필요). `signup.html`·`login.html` 양쪽 이메일 입력란에 `placeholder="example@email.com"` 추가(`type`은 `text` 그대로, `required`/`pattern`/`type="email"` 추가 안 함), 비밀번호류 입력란에는 placeholder 미추가. `login.html`/`login.js`는 확인란·placeholder 외 변경 없음(로그인은 여전히 2필드, `passwordConfirm` 미전송). `docs/bug-history/` 재확인 결과 **관련 히스토리 없음**(M1: 서버 메시지 그대로 표시 패턴을 그대로 재사용해 위반 소지 없음. M2: 이번 변경은 hidden 토글 요소를 늘리지 않음 — 새 선택자는 폼이 보이는 동안 항상 visible이라 3상태 토글 대상이 아님. M4/M5: 이번 변경은 `/api/auth/*` 요청 body 필드 추가일 뿐 쿠키·에러 핸들러 경로를 건드리지 않아 무관) | 사용자 요청(D39 재확정 — 21.1/21.2/21.4/21.6/24.1/24.3, placeholder — 21.13/22.12/25.18) 구현 완료. Chrome 실브라우저로 ① `signup-email`/`login-email` placeholder 속성·초기 빈 value 확인 ② 불일치 값 제출 → 네트워크 탭에서 실제 400 요청 확인 + `signup-error`에 정확한 메시지 표시 확인 ③ 일치 값 제출 → 201 + 폼 hidden + 성공 안내 + 헤더 게스트 상태 유지 확인 ④ 방금 가입한 계정으로 `/login.html` 로그인 → `/`로 이동 + 헤더에 전체 이메일 노출 확인 ⑤ `login.html`에 `login-password-confirm`·`signup-password-hint` 부재, 입력란 정확히 2개 확인. signup/login 전용 Playwright spec은 아직 없음(qa-agent 승인 전) — 기존 `tests/e2e/*.spec.js` 5개에는 signup/login 셀렉터 참조가 없어 회귀 영향 없음 |

@@ -60,15 +60,23 @@ description: "쇼핑몰 백엔드-프론트 경계면을 검증하는 구체적 
 playwright.config.js       -- baseURL: http://localhost:3000, webServer로 npm start 자동 기동
 tests/
   e2e/
-    landing.spec.js         -- 상품 목록 화면
-    product-detail.spec.js  -- 상품 상세 화면
-    cart.spec.js            -- 장바구니 (담기/수량변경/삭제/비우기/할인)
+    landing.spec.js             -- 상품 목록 화면
+    product-detail.spec.js      -- 상품 상세 화면
+    cart.spec.js                -- 장바구니 (담기/수량변경/삭제/비우기/할인/결제진입)
+    checkout.spec.js            -- 결제 화면
+    order.spec.js                -- 주문 확인 화면
+    auth-signup.spec.js         -- 회원가입 화면·API
+    auth-login.spec.js          -- 로그인 화면·API
+    auth-session.spec.js        -- 로그아웃·상태조회(me)·헤더 3상태
+    auth-independence.spec.js   -- 회원 기능의 독립성·비밀번호 비노출·범위 제한
   test-cases.ko.md          -- 사람이 읽는 누적 테스트 케이스 목록
 ```
 
 기능 영역별로 파일을 나누는 이유: 한 파일이 계속 길어지면 다음 사이클에 어디에
 테스트를 추가해야 할지 헷갈린다. 새 화면이 생기면 새 spec 파일을, 기존 화면에
-기능이 추가되면 기존 spec 파일에 `test.describe()` 블록을 추가한다.
+기능이 추가되면 기존 spec 파일에 `test.describe()` 블록을 추가한다. 한 화면의
+케이스가 많아지면(예: 5차 회원가입/로그인) 화면 단위 + 경계면 단위로 여러 파일로
+나눌 수 있다 — `auth-*.spec.js` 4개가 이 패턴의 예시다.
 
 ### 테스트 작성 시 반드시 지킬 것
 
@@ -96,6 +104,20 @@ tests/
 - **작성 후 반드시 `npx playwright test`로 실행해서 통과를 확인한다.** 컨텍스트를
   공유하도록 바꾼 뒤에는 `--headed --workers=1`로도 한 번 실행해서, 창이 파일당
   1개만 뜨는지 직접 눈으로 확인한다.
+- **BDD/시나리오 스타일로 구성한다 (2026-10-07부터 확정).** `test.describe()`는
+  PRD 조항 번호가 아니라 "어떤 방문자가 무엇을 하려는가"를 나타내는 시나리오 제목으로
+  쓴다 (예: `시나리오: 이미 가입된 이메일로 다시 가입을 시도하는 방문자`). 개별
+  `test()` 제목은 "무엇을 하면 무엇이 된다"는 흐름으로 서술하고, PRD 조항/매트릭스
+  번호는 제목 끝에 `[ ]`로 각주만 남긴다 (예: `... 거절된다 [A5]`) — 이 태그 하나로
+  `grep`해서 `test-cases.ko.md`의 해당 케이스로 역추적할 수 있으면 충분하다.
+  여러 단계를 거치는 화면 조작 테스트는 `test.step('Given: ...')` /
+  `test.step('When: ...')` / `test.step('Then: ...')`으로 명시한다 — Playwright
+  기본 기능이라 새 패키지가 필요 없고, HTML 리포트·트레이스 뷰어에 단계별로 찍힌다.
+  **주의**: 이건 설명/구조를 BDD 서술 스타일로 쓴다는 것이지, 테스트 자체를 시나리오
+  순서에 의존하게 만들라는 뜻이 아니다 — 한 `test()`는 여전히 완전히 독립적이어야
+  하고(자기 몫의 상태를 스스로 준비·정리), "시나리오" 안에서도 서로의 결과에
+  의존하지 않는다. `test-cases.ko.md`는 이 구조를 따라갈 필요 없다 — 그 문서는
+  PRD 조항 기준 추적 매트릭스이고, 이 파일들은 읽고 디버깅하는 코드라 목적이 다르다.
 
 ### `tests/test-cases.ko.md` 작성 규칙
 

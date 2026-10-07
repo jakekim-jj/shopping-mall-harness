@@ -5,6 +5,9 @@
  *   "2차 사이클 — 장바구니 화면 + 세션" (PRD 7.1~7.10, 8.1~8.5)
  *   "3차 사이클 — 전체 비우기 + 수량 할인" (PRD 11.1~11.8, 12.1~12.15, 13.1~13.2, 14.1~14.6)
  *
+ * 구성 방식: BDD/시나리오 스타일 (auth-signup.spec.js 머릿말 참고). describe = 시나리오,
+ * 테스트 제목 끝 [ ]는 PRD 조항 각주, test-cases.ko.md 구조는 그대로 둔다.
+ *
  * 규칙 (skills/shopping-mall-qa/SKILL.md)
  *   - 화면에 보이는 금액은 절대 테스트 안에서 곱하거나 더해서 만들지 않는다.
  *     항상 GET /api/cart를 같은 세션으로 따로 호출해 서버 값과 문자열 비교한다 (PRD 7.6).
@@ -49,8 +52,8 @@ test.beforeEach(async () => {
   expect(res.status()).toBe(200);
 });
 
-// route·listener도 컨텍스트와 함께 살아남는다. 특히 7.9의 `**/api/cart` 500 라우트가
-// 남으면 뒤따르는 모든 테스트가 에러 상태로 깨진다. 매 테스트 뒤에 원상복구한다.
+// route·listener도 컨텍스트와 함께 살아남는다. 특히 "실패 처리" 시나리오의 `**/api/cart` 500
+// 라우트가 남으면 뒤따르는 모든 테스트가 에러 상태로 깨진다. 매 테스트 뒤에 원상복구한다.
 test.afterEach(async () => {
   await page.unrouteAll({ behavior: 'ignoreErrors' });
   page.removeAllListeners('request');
@@ -105,8 +108,12 @@ async function expectTotalsMatchServer(page) {
   return cart;
 }
 
-test.describe('장바구니 화면 — 줄 표시 (PRD 7.1/7.6)', () => {
-  test('담긴 줄마다 이미지·이름·단가·수량·줄 합계가 서버 값 그대로 표시된다 (7.1)', async () => {
+// ===========================================================================
+// 시나리오 1: 장바구니에 담긴 상품을 확인하는 방문자
+// [PRD 7.1/7.6]
+// ===========================================================================
+test.describe('시나리오: 장바구니에 담긴 상품을 확인하는 방문자', () => {
+  test('담긴 줄마다, 이미지·이름·단가·수량·줄 합계가 서버 값 그대로 표시된다 [7.1]', async () => {
     await seed(page, 'p1', 2);
     await seed(page, 'p7', 1);
 
@@ -123,7 +130,7 @@ test.describe('장바구니 화면 — 줄 표시 (PRD 7.1/7.6)', () => {
     await expectTotalsMatchServer(page);
   });
 
-  test('화면의 합계는 프론트 계산이 아니라 서버 응답 값과 일치한다 (7.6)', async () => {
+  test('화면의 합계는 프론트가 계산한 값이 아니라, 서버 응답 값과 일치한다 [7.6]', async () => {
     await seed(page, 'p2', 3);
     await seed(page, 'p6', 2);
 
@@ -136,8 +143,12 @@ test.describe('장바구니 화면 — 줄 표시 (PRD 7.1/7.6)', () => {
   });
 });
 
-test.describe('장바구니 화면 — 수량 변경 (PRD 7.2/7.3/7.4)', () => {
-  test('수량 변경은 증감분이 아니라 "변경 후 절대 수량"을 보낸다 (7.2/7.3)', async () => {
+// ===========================================================================
+// 시나리오 2: 장바구니에서 수량을 조절하는 방문자
+// [PRD 7.2~7.4]
+// ===========================================================================
+test.describe('시나리오: 장바구니에서 수량을 조절하는 방문자', () => {
+  test('수량을 변경하면, 증감분이 아니라 "변경 후 절대 수량"을 서버로 보낸다 [7.2/7.3]', async () => {
     await seed(page, 'p1', 2);
 
     const patchBodies = [];
@@ -162,7 +173,7 @@ test.describe('장바구니 화면 — 수량 변경 (PRD 7.2/7.3/7.4)', () => {
     await expectTotalsMatchServer(page);
   });
 
-  test('수량 1에서 감소를 눌러도 quantity 0 요청이 나가지 않고 줄이 사라지지 않는다 (7.4)', async () => {
+  test('수량 1에서 감소를 눌러도, quantity 0 요청이 나가지 않고 줄이 사라지지 않는다 [7.4]', async () => {
     await seed(page, 'p5', 1);
 
     const patchRequests = [];
@@ -191,8 +202,12 @@ test.describe('장바구니 화면 — 수량 변경 (PRD 7.2/7.3/7.4)', () => {
   });
 });
 
-test.describe('장바구니 화면 — 삭제와 빈 상태 (PRD 7.5/7.7/7.8)', () => {
-  test('줄의 삭제 버튼을 누르면 그 상품만 사라지고 다른 줄은 그대로다 (7.5)', async () => {
+// ===========================================================================
+// 시나리오 3: 장바구니에서 상품을 삭제하는 방문자
+// [PRD 7.5/7.7/7.8]
+// ===========================================================================
+test.describe('시나리오: 장바구니에서 상품을 삭제하는 방문자', () => {
+  test('줄의 삭제 버튼을 누르면, 그 상품만 사라지고 다른 줄은 그대로다 [7.5]', async () => {
     await seed(page, 'p1', 2);
     await seed(page, 'p7', 1);
 
@@ -216,7 +231,7 @@ test.describe('장바구니 화면 — 삭제와 빈 상태 (PRD 7.5/7.7/7.8)', 
     await expectTotalsMatchServer(page);
   });
 
-  test('장바구니가 비어 있으면 빈 상태만 보이고 합계 영역은 숨겨진다 (7.7)', async () => {
+  test('장바구니가 비어 있으면, 빈 상태만 보이고 합계 영역은 숨겨진다 [7.7]', async () => {
     await page.goto('/cart.html');
 
     await expect(page.getByTestId('cart-empty')).toBeVisible();
@@ -229,7 +244,7 @@ test.describe('장바구니 화면 — 삭제와 빈 상태 (PRD 7.5/7.7/7.8)', 
     await expect(page.locator('[data-testid="cart-empty"] a[href="/"]')).toHaveCount(1);
   });
 
-  test('마지막 항목을 삭제하면 추가 조회 없이 즉시 빈 상태가 된다 (7.8)', async () => {
+  test('마지막 항목을 삭제하면, 추가 조회 없이 즉시 빈 상태가 된다 [7.8]', async () => {
     await seed(page, 'p6', 1);
 
     await page.goto('/cart.html');
@@ -255,8 +270,12 @@ test.describe('장바구니 화면 — 삭제와 빈 상태 (PRD 7.5/7.7/7.8)', 
   });
 });
 
-test.describe('장바구니 화면 — 실패 처리 (PRD 7.9)', () => {
-  test('수량 변경이 실패하면 에러 상태 하나만 보인다 (7.9)', async () => {
+// ===========================================================================
+// 시나리오 4: 장바구니 요청이 실패하는 상황
+// [PRD 7.9]
+// ===========================================================================
+test.describe('시나리오: 장바구니 요청이 실패하는 상황', () => {
+  test('수량 변경이 실패하면, 에러 상태 하나만 보인다 [7.9]', async () => {
     await seed(page, 'p1', 2);
 
     await page.goto('/cart.html');
@@ -284,7 +303,7 @@ test.describe('장바구니 화면 — 실패 처리 (PRD 7.9)', () => {
     expect(cart.items[0].quantity).toBe(2);
   });
 
-  test('조회가 실패하면 에러 상태 하나만 보이고 화면이 백지가 되지 않는다 (7.9)', async () => {
+  test('조회가 실패하면, 에러 상태 하나만 보이고 화면이 백지가 되지 않는다 [7.9]', async () => {
     await page.route('**/api/cart', (route) =>
       route.fulfill({
         status: 500,
@@ -300,8 +319,12 @@ test.describe('장바구니 화면 — 실패 처리 (PRD 7.9)', () => {
   });
 });
 
-test.describe('장바구니 세션 (PRD 8.1~8.5)', () => {
-  test('장바구니 내용은 브라우저가 아니라 서버에 저장된다 (8.1)', async () => {
+// ===========================================================================
+// 시나리오 5: 여러 번 방문해도 장바구니가 유지되는 방문자
+// [PRD 8.1~8.4]
+// ===========================================================================
+test.describe('시나리오: 여러 번 방문해도 장바구니가 유지되는 방문자', () => {
+  test('장바구니 내용은 브라우저가 아니라 서버에 저장된다 [8.1]', async () => {
     await page.goto('/cart.html'); // 화면을 먼저 연다 (cartId 쿠키는 공유 컨텍스트가 이미 갖고 있다)
     await seed(page, 'p1', 2);
     await page.reload();
@@ -326,7 +349,7 @@ test.describe('장바구니 세션 (PRD 8.1~8.5)', () => {
 
   // ⚠ 공유 컨텍스트 규칙의 예외 — "처음 방문"을 검증하려면 쿠키가 하나도 없는 창이 있어야 한다.
   //   파일 공유 컨텍스트에는 이미 cartId가 발급돼 있어서 이 테스트를 그 창에서는 할 수 없다.
-  test('처음 방문하면 서버가 장바구니 식별 정보를 발급하고 7일간 유지된다 (8.2/8.4)', async ({ browser }) => {
+  test('처음 방문하면, 서버가 장바구니 식별 정보를 발급하고 7일간 유지된다 [8.2/8.4]', async ({ browser }) => {
     const freshContext = await browser.newContext({ baseURL: 'http://localhost:3000' });
     console.log('[cart.spec] 예외: 8.2/8.4가 "쿠키 없는 첫 방문"용 컨텍스트 1개 추가 생성');
     try {
@@ -358,7 +381,7 @@ test.describe('장바구니 세션 (PRD 8.1~8.5)', () => {
     }
   });
 
-  test('새로고침하거나 다른 화면을 거쳐 돌아와도 담긴 내용이 유지된다 (8.3)', async () => {
+  test('새로고침하거나 다른 화면을 거쳐 돌아와도, 담긴 내용이 유지된다 [8.3]', async () => {
     await seed(page, 'p1', 2);
 
     await page.goto('/cart.html');
@@ -374,10 +397,16 @@ test.describe('장바구니 세션 (PRD 8.1~8.5)', () => {
     await expect(page.getByTestId('cart-item')).toHaveCount(1);
     await expectTotalsMatchServer(page);
   });
+});
 
+// ===========================================================================
+// 시나리오 6: 서로 다른 브라우저에서 접속하는 방문자
+// [PRD 8.5]
+// ===========================================================================
+test.describe('시나리오: 서로 다른 브라우저에서 접속하는 방문자', () => {
   // ⚠ 공유 컨텍스트 규칙의 명시적 예외 (SKILL.md) — "서로 다른 브라우저가 독립적인가"를
   //   증명하려면 창이 2개 이상 필요하다. 파일 공유 창 하나로는 이 요구사항 자체를 못 만든다.
-  test('서로 다른 브라우저 컨텍스트는 완전히 독립된 장바구니를 갖는다 (8.5)', async ({ browser }) => {
+  test('서로 다른 브라우저 컨텍스트는, 완전히 독립된 장바구니를 갖는다 [8.5]', async ({ browser }) => {
     const contextA = await browser.newContext({ baseURL: 'http://localhost:3000' });
     const contextB = await browser.newContext({ baseURL: 'http://localhost:3000' });
     console.log('[cart.spec] 예외: 8.5가 격리 증명용 컨텍스트 2개 추가 생성');
@@ -414,8 +443,16 @@ test.describe('장바구니 세션 (PRD 8.1~8.5)', () => {
   });
 });
 
-test.describe('장바구니 전체 비우기 (PRD 11.1~11.5, 13.2)', () => {
-  test('비우기 버튼 한 번에 DELETE /api/cart가 정확히 1건만 나가고 줄 단위 삭제는 0건이다 (11.1/11.2/11.3)', async () => {
+// ⚠ 4차 개정 — 여기 있던 "장바구니 화면에는 결제/주문 버튼이 없다 (7.10)" 테스트는 폐기되었다.
+// 4차에서 PRD 7.10이 15.1로 대체되어 "결제하기" 링크가 정상적으로 생겼기 때문이다
+// (test-cases.ko.md "4차 사이클에서 폐기된 기존 케이스" 참고). 아래 시나리오 8로 교체되었다.
+
+// ===========================================================================
+// 시나리오 7: 장바구니를 한 번에 비우는 방문자
+// [PRD 11.1~11.8, 13.2, 14.1]
+// ===========================================================================
+test.describe('시나리오: 장바구니를 한 번에 비우는 방문자', () => {
+  test('비우기 버튼 한 번에, DELETE /api/cart가 정확히 1건만 나가고 줄 단위 삭제는 0건이다 [11.1/11.2/11.3]', async () => {
     await seed(page, 'p1', 2);
     await seed(page, 'p7', 3);
     await seed(page, 'p4', 1);
@@ -457,7 +494,7 @@ test.describe('장바구니 전체 비우기 (PRD 11.1~11.5, 13.2)', () => {
     expect(cart).toEqual({ items: [], totalQuantity: 0, totalPrice: 0 });
   });
 
-  test('장바구니가 비어 있으면 비우기 버튼은 DOM에 남되 보이지 않는다 (11.5/14.1)', async () => {
+  test('장바구니가 비어 있으면, 비우기 버튼은 DOM에 남되 보이지 않는다 [11.5/14.1]', async () => {
     await page.goto('/cart.html');
     await expect(page.getByTestId('cart-empty')).toBeVisible();
 
@@ -470,7 +507,7 @@ test.describe('장바구니 전체 비우기 (PRD 11.1~11.5, 13.2)', () => {
     await expect(page.getByTestId('cart-clear')).toBeVisible();
   });
 
-  test('이미 비어 있는 장바구니를 다시 비워도 에러가 나지 않는다 — 멱등 (11.3/13.2)', async () => {
+  test('이미 비어 있는 장바구니를 다시 비워도, 에러가 나지 않는다 — 멱등 [11.3/13.2]', async () => {
     // 화면에서는 버튼이 숨겨져 있으므로(11.5) 멱등성은 엔드포인트로 확인한다
     const first = await page.context().request.delete('/api/cart');
     const second = await page.context().request.delete('/api/cart');
@@ -486,7 +523,7 @@ test.describe('장바구니 전체 비우기 (PRD 11.1~11.5, 13.2)', () => {
     await expectOnlyState(page, 'cart-empty');
   });
 
-  test('비우기 버튼은 장바구니 화면에만 있다 (11.8)', async () => {
+  test('비우기 버튼은, 장바구니 화면에만 있다 [11.8]', async () => {
     await page.goto('/');
     await expect(page.getByTestId('cart-clear')).toHaveCount(0);
 
@@ -494,14 +531,14 @@ test.describe('장바구니 전체 비우기 (PRD 11.1~11.5, 13.2)', () => {
     await expect(page.getByTestId('product-detail')).toBeVisible();
     await expect(page.getByTestId('cart-clear')).toHaveCount(0);
   });
-
 });
 
-// ⚠ 4차 개정 — 여기 있던 "장바구니 화면에는 결제/주문 버튼이 없다 (7.10)" 테스트는 폐기되었다.
-// 4차에서 PRD 7.10이 15.1로 대체되어 "결제하기" 링크가 정상적으로 생겼기 때문이다
-// (test-cases.ko.md "4차 사이클에서 폐기된 기존 케이스" 참고). 아래 15.x 블록으로 교체한다.
-test.describe('장바구니 → 결제 진입 (PRD 15.1~15.5, 19.18)', () => {
-  test('담긴 상품이 있으면 결제하기 링크가 보이고, 진짜 링크라서 누르면 이동하고 뒤로가기도 정상 동작한다 (15.1)', async () => {
+// ===========================================================================
+// 시나리오 8: 결제로 넘어가려는 방문자
+// [PRD 15.1~15.5, 19.18]
+// ===========================================================================
+test.describe('시나리오: 결제로 넘어가려는 방문자', () => {
+  test('담긴 상품이 있으면, 결제하기 링크가 보이고 진짜 링크라서 눌러도 뒤로가기가 정상 동작한다 [15.1]', async () => {
     await seed(page, 'p1', 2);
     await page.goto('/cart.html');
 
@@ -519,7 +556,7 @@ test.describe('장바구니 → 결제 진입 (PRD 15.1~15.5, 19.18)', () => {
     await expect(page.getByTestId('cart-item')).toHaveCount(1);
   });
 
-  test('장바구니가 비어 있으면 결제하기 링크는 DOM에는 남고 화면에서만 숨겨진다 (15.2/19.18)', async () => {
+  test('장바구니가 비어 있으면, 결제하기 링크는 DOM에는 남고 화면에서만 숨겨진다 [15.2/19.18]', async () => {
     await page.goto('/cart.html');
     await expect(page.getByTestId('cart-empty')).toBeVisible();
 
@@ -531,7 +568,7 @@ test.describe('장바구니 → 결제 진입 (PRD 15.1~15.5, 19.18)', () => {
     await expect(page.getByTestId('checkout-link')).toBeVisible();
   });
 
-  test('결제하기 링크가 생겨도 비우기 버튼은 그대로 있고, 결제하기를 눌러도 장바구니가 비워지지 않는다 (15.5)', async () => {
+  test('결제하기 링크가 생겨도 비우기 버튼은 그대로 있고, 눌러서 이동만 해도 장바구니는 비워지지 않는다 [15.5]', async () => {
     await seed(page, 'p1', 2);
     await page.goto('/cart.html');
 
@@ -547,7 +584,7 @@ test.describe('장바구니 → 결제 진입 (PRD 15.1~15.5, 19.18)', () => {
     expect(cart.items[0]).toMatchObject({ productId: 'p1', quantity: 2 });
   });
 
-  test('결제 화면으로 들어가는 입구는 장바구니 화면 하나뿐이다 — 목록·상세·헤더 어디에도 없다 (15.3)', async () => {
+  test('결제 화면으로 들어가는 입구는, 장바구니 화면 하나뿐이다 — 목록·상세·헤더 어디에도 없다 [15.3]', async () => {
     await page.goto('/');
     await expect(page.locator('[data-testid*="checkout"]')).toHaveCount(0);
     await expect(page.locator('a,button', { hasText: /결제|바로\s*구매/i })).toHaveCount(0);
@@ -563,8 +600,12 @@ test.describe('장바구니 → 결제 진입 (PRD 15.1~15.5, 19.18)', () => {
   });
 });
 
-test.describe('수량 기반 자동 할인 (PRD 12.1~12.13, 14.2~14.5)', () => {
-  test('9개는 할인이 적용되지 않고 할인 관련 요소가 DOM에 아예 없다 (12.1/12.2/12.10/14.4)', async () => {
+// ===========================================================================
+// 시나리오 9: 수량에 따라 자동 할인을 받는 방문자
+// [PRD 12.1~12.13, 14.2~14.6]
+// ===========================================================================
+test.describe('시나리오: 수량에 따라 자동 할인을 받는 방문자', () => {
+  test('9개를 담으면, 할인이 적용되지 않고 할인 관련 요소가 DOM에 아예 없다 [12.1/12.2/12.10/14.4]', async () => {
     await seed(page, 'p1', 9);
 
     await page.goto('/cart.html');
@@ -584,7 +625,7 @@ test.describe('수량 기반 자동 할인 (PRD 12.1~12.13, 14.2~14.5)', () => {
     await expectTotalsMatchServer(page);
   });
 
-  test('9개 → 10개로 올리면 그 줄에 할인 표시가 나타난다 — 금액은 그대로여도 (12.2/12.7/12.9/14.2/14.3)', async () => {
+  test('9개 → 10개로 올리면, 그 줄에 할인 표시가 나타난다 — 금액은 그대로여도 [12.2/12.7/12.9/14.2/14.3]', async () => {
     await seed(page, 'p1', 9);
 
     await page.goto('/cart.html');
@@ -634,7 +675,7 @@ test.describe('수량 기반 자동 할인 (PRD 12.1~12.13, 14.2~14.5)', () => {
     await expectTotalsMatchServer(page);
   });
 
-  test('10개 → 9개로 내리면 할인 표시가 DOM에서 사라진다 (12.7/12.10)', async () => {
+  test('10개 → 9개로 내리면, 할인 표시가 DOM에서 사라진다 [12.7/12.10]', async () => {
     await seed(page, 'p1', 10);
 
     await page.goto('/cart.html');
@@ -655,7 +696,7 @@ test.describe('수량 기반 자동 할인 (PRD 12.1~12.13, 14.2~14.5)', () => {
     await expectTotalsMatchServer(page);
   });
 
-  test('할인은 줄마다 따로 판정한다 — 6개 + 5개(합 11개)는 어느 줄도 할인되지 않는다 (12.4/12.5)', async () => {
+  test('할인은 줄마다 따로 판정한다 — 6개 + 5개(합 11개)는 어느 줄도 할인되지 않는다 [12.4/12.5]', async () => {
     await seed(page, 'p1', 6);
     await seed(page, 'p7', 5);
 
@@ -677,7 +718,7 @@ test.describe('수량 기반 자동 할인 (PRD 12.1~12.13, 14.2~14.5)', () => {
     await expectTotalsMatchServer(page);
   });
 
-  test('한 줄만 10개면 그 줄만 할인되고 다른 줄은 정가다 (12.4/12.6)', async () => {
+  test('한 줄만 10개면, 그 줄만 할인되고 다른 줄은 정가다 [12.4/12.6]', async () => {
     await seed(page, 'p1', 10);
     await seed(page, 'p7', 1);
 
@@ -704,7 +745,7 @@ test.describe('수량 기반 자동 할인 (PRD 12.1~12.13, 14.2~14.5)', () => {
     await expectTotalsMatchServer(page);
   });
 
-  test('상세 화면에서 나눠 담아 10개가 되어도 장바구니에서는 할인 줄로 보인다 (12.8)', async () => {
+  test('상세 화면에서 나눠 담아 10개가 되어도, 장바구니에서는 할인 줄로 보인다 [12.8]', async () => {
     await page.goto('/product.html?id=p1');
     await expect(page.getByTestId('product-detail')).toBeVisible();
 

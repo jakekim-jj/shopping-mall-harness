@@ -5,6 +5,9 @@
  *
  * 커버 범위: PRD 6.1 ~ 6.12 (+ 10.3~10.7 선택자, 5.6 배지 갱신)
  *
+ * 구성 방식: BDD/시나리오 스타일 (auth-signup.spec.js 머릿말 참고). describe = 시나리오,
+ * 테스트 제목 끝 [ ]는 PRD 조항 각주, test-cases.ko.md 구조는 그대로 둔다.
+ *
  * 규칙 (skills/shopping-mall-qa/SKILL.md)
  *   - 선택자는 data-testid만. 예외는 "목록으로 돌아가는 링크"의 href뿐이다
  *     (PRD 6.11에 전용 testid가 없고, 링크의 목적지 자체가 요구사항이다).
@@ -42,8 +45,8 @@ test.beforeEach(async () => {
   expect(res.status()).toBe(200);
 });
 
-// route·listener도 컨텍스트와 함께 살아남는다 (예: 6.11이 건 /api/products/* 500 라우트가
-// 남으면 뒤따르는 모든 테스트가 에러 상태가 된다). 매 테스트 뒤에 원상복구한다.
+// route·listener도 컨텍스트와 함께 살아남는다 (예: "존재하지 않음" 시나리오가 건 /api/products/*
+// 500 라우트가 남으면 뒤따르는 모든 테스트가 에러 상태가 된다). 매 테스트 뒤에 원상복구한다.
 test.afterEach(async () => {
   await page.unrouteAll({ behavior: 'ignoreErrors' });
   page.removeAllListeners('request');
@@ -66,8 +69,12 @@ async function expectOnlyState(page, expected) {
   expect(visible).toEqual([expected]);
 }
 
-test.describe('상품 상세 화면 — 표시 (PRD 6.1/6.2/6.10/6.11)', () => {
-  test('이미지·이름·가격·설명 4가지가 모두 표시되고 가격 포맷이 목록과 같다 (6.1/6.2)', async ({ request }) => {
+// ===========================================================================
+// 시나리오 1: 상품 상세를 살펴보는 방문자
+// [PRD 6.1/6.2/6.10~6.12]
+// ===========================================================================
+test.describe('시나리오: 상품 상세를 살펴보는 방문자', () => {
+  test('이미지·이름·가격·설명 4가지가 모두 표시되고, 가격 포맷이 목록과 같다 [6.1/6.2]', async ({ request }) => {
     const body = await (await request.get('/api/products/p1')).json();
     const item = body.item;
 
@@ -84,32 +91,38 @@ test.describe('상품 상세 화면 — 표시 (PRD 6.1/6.2/6.10/6.11)', () => {
     await expectOnlyState(page, 'product-detail');
   });
 
-  test('정상·not-found·에러 어느 상태에서도 목록으로 돌아가는 링크가 있다 (6.11)', async () => {
+  test('정상·not-found·에러 어느 상태에서도, 목록으로 돌아가는 링크가 있다 [6.11]', async () => {
     const backlink = page.locator('main a[href="/"]');
 
-    await page.goto('/product.html?id=p1');
-    await expect(page.getByTestId('product-detail')).toBeVisible();
-    expect(await backlink.count()).toBeGreaterThan(0);
-    await expect(backlink.first()).toBeVisible();
+    await test.step('정상 상태에도 링크가 있다', async () => {
+      await page.goto('/product.html?id=p1');
+      await expect(page.getByTestId('product-detail')).toBeVisible();
+      expect(await backlink.count()).toBeGreaterThan(0);
+      await expect(backlink.first()).toBeVisible();
+    });
 
-    await page.goto('/product.html?id=does-not-exist');
-    await expect(page.getByTestId('detail-not-found')).toBeVisible();
-    await expect(backlink.first()).toBeVisible();
+    await test.step('not-found 상태에도 링크가 있다', async () => {
+      await page.goto('/product.html?id=does-not-exist');
+      await expect(page.getByTestId('detail-not-found')).toBeVisible();
+      await expect(backlink.first()).toBeVisible();
+    });
 
-    await page.route('**/api/products/*', (route) =>
-      route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({ error: { message: '상품 목록을 불러오지 못했습니다.' } }),
-      })
-    );
-    await page.goto('/product.html?id=p1');
-    await expect(page.getByTestId('detail-error')).toBeVisible();
-    await expect(backlink.first()).toBeVisible();
-    await expectOnlyState(page, 'detail-error');
+    await test.step('에러 상태에도 링크가 있다', async () => {
+      await page.route('**/api/products/*', (route) =>
+        route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { message: '상품 목록을 불러오지 못했습니다.' } }),
+        })
+      );
+      await page.goto('/product.html?id=p1');
+      await expect(page.getByTestId('detail-error')).toBeVisible();
+      await expect(backlink.first()).toBeVisible();
+      await expectOnlyState(page, 'detail-error');
+    });
   });
 
-  test('상세 화면에는 결제/구매 버튼이 없다 (6.12)', async () => {
+  test('상세 화면에는 결제/구매 버튼이 없다 [6.12]', async () => {
     await page.goto('/product.html?id=p1');
     await expect(page.getByTestId('product-detail')).toBeVisible();
 
@@ -121,8 +134,12 @@ test.describe('상품 상세 화면 — 표시 (PRD 6.1/6.2/6.10/6.11)', () => {
   });
 });
 
-test.describe('상품 상세 화면 — 수량 조절 (PRD 6.3)', () => {
-  test('수량 1에서 감소를 눌러도 0/음수가 되지 않는다', async () => {
+// ===========================================================================
+// 시나리오 2: 담을 수량을 조절하는 방문자
+// [PRD 6.3]
+// ===========================================================================
+test.describe('시나리오: 담을 수량을 조절하는 방문자', () => {
+  test('수량 1에서 감소를 눌러도, 0이나 음수가 되지 않는다', async () => {
     await page.goto('/product.html?id=p1');
     await expect(page.getByTestId('product-detail')).toBeVisible();
 
@@ -157,8 +174,12 @@ test.describe('상품 상세 화면 — 수량 조절 (PRD 6.3)', () => {
   });
 });
 
-test.describe('상품 상세 화면 — 장바구니 담기 (PRD 6.4~6.7)', () => {
-  test('담기를 누르면 POST가 나가고 성공 안내·배지가 갱신되며 화면 이동은 없다 (6.4/6.5)', async () => {
+// ===========================================================================
+// 시나리오 3: 상품을 장바구니에 담는 방문자
+// [PRD 6.4~6.7]
+// ===========================================================================
+test.describe('시나리오: 상품을 장바구니에 담는 방문자', () => {
+  test('담기를 누르면, 요청이 나가고 성공 안내·배지가 갱신되며 화면 이동은 없다 [6.4/6.5]', async () => {
     const posts = [];
     page.on('request', (req) => {
       if (req.method() === 'POST' && req.url().includes('/api/cart/items')) {
@@ -184,7 +205,7 @@ test.describe('상품 상세 화면 — 장바구니 담기 (PRD 6.4~6.7)', () =
     await expect(page.getByTestId('product-detail')).toBeVisible();
   });
 
-  test('같은 상품을 다시 담으면 새 줄이 생기지 않고 기존 줄의 수량에 합쳐진다 (6.6)', async () => {
+  test('같은 상품을 다시 담으면, 새 줄이 생기지 않고 기존 줄의 수량에 합쳐진다 [6.6]', async () => {
     await page.goto('/product.html?id=p2');
     await expect(page.getByTestId('product-detail')).toBeVisible();
 
@@ -204,7 +225,7 @@ test.describe('상품 상세 화면 — 장바구니 담기 (PRD 6.4~6.7)', () =
     expect(cart.totalQuantity).toBe(5);
   });
 
-  test('담기에 실패하면(99 상한 초과) 배지는 그대로이고 실패 안내가 뜬다 (6.7)', async () => {
+  test('99개가 이미 담긴 상품을 더 담으려 하면, 배지는 그대로이고 실패 안내가 뜬다 [6.7]', async () => {
     await page.goto('/product.html?id=p4');
     await expect(page.getByTestId('product-detail')).toBeVisible();
 
@@ -227,8 +248,12 @@ test.describe('상품 상세 화면 — 장바구니 담기 (PRD 6.4~6.7)', () =
   });
 });
 
-test.describe('상품 상세 화면 — 찾을 수 없음 (PRD 6.8/6.9/6.10)', () => {
-  test('존재하지 않는 id로 접속하면 not-found 상태만 보인다 (6.8/6.10)', async () => {
+// ===========================================================================
+// 시나리오 4: 존재하지 않는 상품에 접근하는 방문자
+// [PRD 6.8/6.9/6.10]
+// ===========================================================================
+test.describe('시나리오: 존재하지 않는 상품에 접근하는 방문자', () => {
+  test('존재하지 않는 id로 접속하면, not-found 상태만 보인다 [6.8/6.10]', async () => {
     await page.goto('/product.html?id=zzz-not-a-product');
 
     await expect(page.getByTestId('detail-not-found')).toBeVisible();
@@ -236,7 +261,7 @@ test.describe('상품 상세 화면 — 찾을 수 없음 (PRD 6.8/6.9/6.10)', (
     await expect(page.locator('[data-testid="detail-not-found"] a[href="/"]')).toHaveCount(1);
   });
 
-  test('id가 아예 없으면 상품 API를 호출하지 않고 바로 not-found가 된다 (6.9)', async () => {
+  test('id가 아예 없으면, 상품 API를 호출하지 않고 바로 not-found가 된다 [6.9]', async () => {
     const productRequests = [];
     page.on('request', (req) => {
       if (req.url().includes('/api/products')) {
@@ -253,7 +278,7 @@ test.describe('상품 상세 화면 — 찾을 수 없음 (PRD 6.8/6.9/6.10)', (
     expect(productRequests).toEqual([]);
   });
 
-  test('id가 빈 문자열이어도 상품 API를 호출하지 않는다 (6.9)', async () => {
+  test('id가 빈 문자열이어도, 상품 API를 호출하지 않는다 [6.9]', async () => {
     const productRequests = [];
     page.on('request', (req) => {
       if (req.url().includes('/api/products')) {

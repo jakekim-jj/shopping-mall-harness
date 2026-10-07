@@ -3,6 +3,9 @@
 /**
  * 주문 확인 화면 — tests/test-cases.ko.md "4차 사이클 — 모의 결제" 중 "주문 확인 화면" (PRD 17.x)
  *
+ * 구성 방식: BDD/시나리오 스타일 (auth-signup.spec.js 머릿말 참고). describe = 시나리오,
+ * 테스트 제목 끝 [ ]는 PRD 조항 각주, test-cases.ko.md 구조는 그대로 둔다.
+ *
  * 규칙 (skills/shopping-mall-qa/SKILL.md)
  *   - data-testid 선택자만 쓴다. 예외는 "목록으로 돌아가는 링크"의 href다
  *     (order.html에 전용 testid가 없고, product-detail.spec.js와 같은 이유).
@@ -12,7 +15,7 @@
  *   - 주문은 매번 UI로 결제를 완주시키지 않고 POST /api/checkout을 직접 호출해 만든다
  *     (cart.spec.js의 seed() 헬퍼와 같은 접근 — 결제 플로우 자체는 checkout.spec.js가 검증한다).
  *   - spec 파일 하나당 브라우저 컨텍스트(창)는 하나다. 아래 beforeAll에서 한 번만 만든다.
- *   - 예외: 17.8("남의 주문은 안 보인다")은 8.5와 같은 이유로 창을 하나 더 열었다 닫는다.
+ *   - 예외: "다른 브라우저에서는 안 보인다" 시나리오는 8.5와 같은 이유로 창을 하나 더 열었다 닫는다.
  */
 const { test, expect } = require('@playwright/test');
 
@@ -86,8 +89,12 @@ async function expectOnlyState(page, expected) {
   expect(visible).toEqual([expected]);
 }
 
-test.describe('주문 확인 화면 — 표시 (PRD 17.1/17.2, 19.18)', () => {
-  test('주문번호·상태·일시·주문자·연락처·상품줄·총수량·총금액이 모두 표시되고 주문번호 형식이 맞다 (17.1)', async () => {
+// ===========================================================================
+// 시나리오 1: 주문 완료 후 확인 화면을 보는 방문자
+// [PRD 17.1/17.2, 19.18]
+// ===========================================================================
+test.describe('시나리오: 주문 완료 후 확인 화면을 보는 방문자', () => {
+  test('주문번호·상태·일시·주문자·연락처·상품줄·총수량·총금액이 모두 표시되고, 주문번호 형식이 맞다 [17.1]', async () => {
     const order = await createOrder(
       page,
       [
@@ -119,7 +126,7 @@ test.describe('주문 확인 화면 — 표시 (PRD 17.1/17.2, 19.18)', () => {
     }
   });
 
-  test('"결제 완료" 표시는 서버가 알려준 status 값에 근거한다 — 화면이 임의로 적어넣지 않는다 (17.2)', async () => {
+  test('"결제 완료" 표시는 서버가 알려준 status 값에 근거한다 — 화면이 임의로 적어넣지 않는다 [17.2]', async () => {
     const order = await createOrder(page, [{ productId: 'p2', quantity: 1 }]);
     expect(order.status).toBe('PAID');
 
@@ -132,8 +139,12 @@ test.describe('주문 확인 화면 — 표시 (PRD 17.1/17.2, 19.18)', () => {
   });
 });
 
-test.describe('주문 확인 화면 — 세 화면 금액 일치 (PRD 17.4)', () => {
-  test('할인이 걸린 줄이 있어도 장바구니·결제 화면·주문 확인 화면의 총 금액이 정확히 같다 (17.4)', async () => {
+// ===========================================================================
+// 시나리오 2: 세 화면의 금액이 일치하는지 확인하는 방문자
+// [PRD 17.4]
+// ===========================================================================
+test.describe('시나리오: 세 화면의 금액이 일치하는지 확인하는 방문자', () => {
+  test('할인이 걸린 줄이 있어도, 장바구니·결제 화면·주문 확인 화면의 총 금액이 정확히 같다 [17.4]', async () => {
     await seedCart(page, [
       { productId: 'p1', quantity: 10 },
       { productId: 'p7', quantity: 2 },
@@ -156,8 +167,12 @@ test.describe('주문 확인 화면 — 세 화면 금액 일치 (PRD 17.4)', ()
   });
 });
 
-test.describe('주문 확인 화면 — 새로고침·잘못된 주소 (PRD 17.5~17.8)', () => {
-  test('새로고침해도 서버에서 다시 조회해 주문 정보가 그대로 표시된다 (17.5)', async () => {
+// ===========================================================================
+// 시나리오 3: 새로고침하거나 잘못된 주소로 접속하는 방문자
+// [PRD 17.5~17.8]
+// ===========================================================================
+test.describe('시나리오: 새로고침하거나 잘못된 주소로 접속하는 방문자', () => {
+  test('새로고침해도, 서버에서 다시 조회해 주문 정보가 그대로 표시된다 [17.5]', async () => {
     const order = await createOrder(page, [{ productId: 'p3', quantity: 1 }]);
 
     await page.goto('/order.html?orderId=' + order.orderId);
@@ -169,7 +184,7 @@ test.describe('주문 확인 화면 — 새로고침·잘못된 주소 (PRD 17.5
     await expect(page.getByTestId('order-total-price')).toHaveText(formatPrice(order.totalPrice));
   });
 
-  test('주소에 주문번호가 아예 없으면 서버에 요청을 보내지 않고 바로 찾을 수 없음 상태가 된다 (17.6)', async () => {
+  test('주소에 주문번호가 아예 없으면, 서버에 요청을 보내지 않고 바로 찾을 수 없음 상태가 된다 [17.6]', async () => {
     const orderRequests = [];
     page.on('request', (req) => {
       if (req.url().includes('/api/orders')) orderRequests.push(req.url());
@@ -183,14 +198,14 @@ test.describe('주문 확인 화면 — 새로고침·잘못된 주소 (PRD 17.5
     expect(orderRequests).toEqual([]);
   });
 
-  test('존재하지 않는 주문번호로 접속하면 찾을 수 없음 안내와 목록으로 가는 링크가 표시된다 (17.7)', async () => {
+  test('존재하지 않는 주문번호로 접속하면, 찾을 수 없음 안내와 목록으로 가는 링크가 표시된다 [17.7]', async () => {
     await page.goto('/order.html?orderId=ORD-20260101-ZZZZZZ');
     await expect(page.getByTestId('order-not-found')).toBeVisible();
     await expectOnlyState(page, 'order-not-found');
     await expect(page.locator('[data-testid="order-not-found"] a[href="/"]')).toHaveCount(1);
   });
 
-  test('다른 브라우저에서는 같은 주문 주소가 안 보이고, "없는 주문"과 "남의 주문"은 화면상 똑같이 처리된다 (17.8)', async ({
+  test('다른 브라우저에서는 같은 주문 주소가 안 보이고, "없는 주문"과 "남의 주문"은 화면상 똑같이 처리된다 [17.8]', async ({
     browser,
   }) => {
     const order = await createOrder(page, [{ productId: 'p4', quantity: 1 }]);
@@ -222,8 +237,12 @@ test.describe('주문 확인 화면 — 새로고침·잘못된 주소 (PRD 17.5
   });
 });
 
-test.describe('주문 확인 화면 — 공통 헤더와 배지 (PRD 17.9/17.10)', () => {
-  test('상품 목록으로 돌아가는 링크와 공통 헤더(장바구니 링크·수량 배지)가 있다 (17.9)', async () => {
+// ===========================================================================
+// 시나리오 4: 주문 확인 화면의 공통 헤더를 확인하는 방문자
+// [PRD 17.9/17.10]
+// ===========================================================================
+test.describe('시나리오: 주문 확인 화면의 공통 헤더를 확인하는 방문자', () => {
+  test('상품 목록으로 돌아가는 링크와 공통 헤더(장바구니 링크·수량 배지)가 있다 [17.9]', async () => {
     const order = await createOrder(page, [{ productId: 'p5', quantity: 1 }]);
     await page.goto('/order.html?orderId=' + order.orderId);
 
@@ -236,7 +255,7 @@ test.describe('주문 확인 화면 — 공통 헤더와 배지 (PRD 17.9/17.10)
     await expect(page.getByTestId('cart-count')).toHaveCount(1);
   });
 
-  test('결제 성공으로 장바구니가 비워졌으므로 상단 수량 배지는 0이 되어 숨겨진다 (17.10)', async () => {
+  test('결제 성공으로 장바구니가 비워졌으므로, 상단 수량 배지는 0이 되어 숨겨진다 [17.10]', async () => {
     const order = await createOrder(page, [{ productId: 'p6', quantity: 1 }]);
     await page.goto('/order.html?orderId=' + order.orderId);
 
@@ -246,43 +265,55 @@ test.describe('주문 확인 화면 — 공통 헤더와 배지 (PRD 17.9/17.10)
   });
 });
 
-test.describe('주문 확인 화면 — 상태 (PRD 17.11)', () => {
-  test('로딩·정상·찾을 수 없음·에러 중 항상 하나만 보인다 (17.11)', async () => {
+// ===========================================================================
+// 시나리오 5: 주문 확인 화면의 상태 전환을 확인하는 방문자
+// [PRD 17.11]
+// ===========================================================================
+test.describe('시나리오: 주문 확인 화면의 상태 전환을 확인하는 방문자', () => {
+  test('로딩·정상·찾을 수 없음·에러 중, 항상 하나만 보인다 [17.11]', async () => {
     const order = await createOrder(page, [{ productId: 'p1', quantity: 1 }]);
 
-    // 로딩
-    await page.route('**/api/orders/*', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      await route.continue();
+    await test.step('로딩 중에는 로딩 상태만 보인다', async () => {
+      await page.route('**/api/orders/*', async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await route.continue();
+      });
+      await page.goto('/order.html?orderId=' + order.orderId, { waitUntil: 'commit' });
+      await expectOnlyState(page, 'order-loading');
+      await page.unroute('**/api/orders/*');
     });
-    await page.goto('/order.html?orderId=' + order.orderId, { waitUntil: 'commit' });
-    await expectOnlyState(page, 'order-loading');
-    await page.unroute('**/api/orders/*');
 
-    // 정상
-    await page.goto('/order.html?orderId=' + order.orderId);
-    await expectOnlyState(page, 'order-confirmation');
+    await test.step('정상 조회되면 정상 상태만 보인다', async () => {
+      await page.goto('/order.html?orderId=' + order.orderId);
+      await expectOnlyState(page, 'order-confirmation');
+    });
 
-    // 찾을 수 없음
-    await page.goto('/order.html?orderId=ORD-99999999-ZZZZZZ');
-    await expectOnlyState(page, 'order-not-found');
+    await test.step('존재하지 않으면 찾을 수 없음 상태만 보인다', async () => {
+      await page.goto('/order.html?orderId=ORD-99999999-ZZZZZZ');
+      await expectOnlyState(page, 'order-not-found');
+    });
 
-    // 에러 (500)
-    await page.route('**/api/orders/*', (route) =>
-      route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({ error: { message: '주문 정보를 불러오지 못했습니다.' } }),
-      })
-    );
-    await page.goto('/order.html?orderId=' + order.orderId);
-    await expect(page.getByTestId('order-error')).toBeVisible();
-    await expectOnlyState(page, 'order-error');
+    await test.step('서버 오류(500)면 에러 상태만 보인다', async () => {
+      await page.route('**/api/orders/*', (route) =>
+        route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { message: '주문 정보를 불러오지 못했습니다.' } }),
+        })
+      );
+      await page.goto('/order.html?orderId=' + order.orderId);
+      await expect(page.getByTestId('order-error')).toBeVisible();
+      await expectOnlyState(page, 'order-error');
+    });
   });
 });
 
-test.describe('주문 확인 화면 — 할인 표시 없음 / 금지된 버튼 (PRD 17.12/17.13)', () => {
-  test('할인이 걸린 주문이어도 취소선·할인가·안내 문구가 화면에 없다 (17.12)', async () => {
+// ===========================================================================
+// 시나리오 6: 할인 표시와 금지된 버튼이 없는지 확인하는 방문자
+// [PRD 17.12/17.13]
+// ===========================================================================
+test.describe('시나리오: 할인 표시와 금지된 버튼이 없는지 확인하는 방문자', () => {
+  test('할인이 걸린 주문이어도, 취소선·할인가·안내 문구가 화면에 없다 [17.12]', async () => {
     const order = await createOrder(page, [{ productId: 'p1', quantity: 10 }]);
     expect(order.items[0].discountApplied).toBe(true);
 
@@ -297,7 +328,7 @@ test.describe('주문 확인 화면 — 할인 표시 없음 / 금지된 버튼 
     );
   });
 
-  test('주문 취소·환불 요청·재주문·영수증 출력·배송 조회 버튼이 없다 (17.13)', async () => {
+  test('주문 취소·환불 요청·재주문·영수증 출력·배송 조회 버튼이 없다 [17.13]', async () => {
     const order = await createOrder(page, [{ productId: 'p2', quantity: 1 }]);
     await page.goto('/order.html?orderId=' + order.orderId);
     await expect(page.getByTestId('order-confirmation')).toBeVisible();

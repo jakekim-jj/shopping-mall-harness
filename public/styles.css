@@ -895,3 +895,87 @@ body {
   .summary-line { flex-wrap: wrap; }
   .summary-line__total { margin-left: auto; }
 }
+
+/* =======================================================================
+   5차 사이클 추가 (2026-10-06) — 공통 헤더 인증 영역 / 회원가입(/signup.html) /
+   로그인(/login.html). 위쪽 규칙은 그대로 두고 아래에만 덧붙인다.
+   인증 폼은 결제 화면의 .field/.field__label/.field__input, .btn/.btn--primary,
+   .alert(기존 checkout-error와 같은 클래스)를 그대로 재사용한다 — 새 입력 스타일을
+   따로 만들지 않는다.
+   ======================================================================= */
+
+/* ---------- 공통 헤더 — 인증 영역 (PRD 20장) ---------- */
+
+.auth-area {
+  display: flex;
+  align-items: center;
+}
+
+/* auth-guest/auth-user 둘 다 DOM에 항상 존재하고 hidden 토글만 된다 (PRD 20.5).
+   [hidden] 기본 동작(display:none)을 그대로 쓴다 — 별도 CSS로 덮어쓰지 않는다. */
+.auth-guest,
+.auth-user {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12.5px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.auth-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.auth-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* 이메일은 마스킹 없이 전체 표시한다 (PRD 20.4) — 링크가 아니라 평범한 텍스트다. */
+.auth-user__email {
+  color: var(--muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auth-logout {
+  padding: 5px 12px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.auth-logout:hover { border-color: var(--ink); }
+.auth-logout:disabled { opacity: 0.45; cursor: default; }
+
+/* ---------- 회원가입 / 로그인 화면 — 입력 폼 ---------- */
+
+.auth-form { max-width: 420px; }
+
+/* 비밀번호 입력란 바로 아래의 고정 안내 문구 (PRD 21.12) — 에러 문구(.alert)와 별개 요소이며
+   에러/성공 상태와 무관하게 항상 같은 텍스트로 보인다. */
+.field__hint {
+  margin: 7px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.auth-links {
+  margin: 20px 0 0;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+}
+
+.auth-links a { color: var(--accent); }
+
+/* 가입 성공 안내 — 기존 .notice(에러 전용 .notice--error)에 성공 색상 변형을 추가한다. */
+.notice--success {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.notice--success .notice__title { color: var(--accent); }

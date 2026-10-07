@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>하루상점 — 회원가입</title>
+  <meta name="description" content="하루상점 회원가입 화면입니다.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div class="mark">
+        <a class="mark__home" href="/">
+          <span class="mark__latin">HARU STORE</span>
+        </a>
+        <span class="mark__ko">하루상점 · 매일 쓰는 것들</span>
+      </div>
+      <div class="masthead__aside">
+        <div class="auth-area" data-testid="auth-area">
+          <div class="auth-guest" data-testid="auth-guest" hidden>
+            <a class="auth-link" data-testid="auth-login-link" href="/login.html">로그인</a>
+            <a class="auth-link" data-testid="auth-signup-link" href="/signup.html">회원가입</a>
+          </div>
+          <div class="auth-user" data-testid="auth-user" hidden>
+            <span class="auth-user__email" data-testid="auth-user-email"></span>
+            <button class="auth-logout" type="button" data-testid="auth-logout-button">로그아웃</button>
+          </div>
+        </div>
+        <a class="cart-link" data-testid="cart-link" href="/cart.html">
+          <span class="cart-link__label">장바구니</span>
+          <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shelf">
+    <h1 class="shelf__title">회원가입</h1>
+    <p class="backlink"><a href="/">← 판매 중인 상품</a></p>
+
+    <!-- 입력란 3개(이메일/비밀번호/비밀번호 확인) — 2026-10-06 D39로 비밀번호 확인 칸이 추가됐다 (PRD 21.1).
+         required/pattern/minlength/maxlength/type="email" 등 HTML5 검증 속성을 쓰지 않는다 (PRD 21.6) —
+         서버가 모든 검증을 하고 프론트는 그대로 전송한다. type="password"(마스킹)만 허용한다.
+         placeholder="example@email.com"은 검증 속성이 아니라 힌트 텍스트일 뿐이다 (PRD 21.13) — type은
+         그대로 text로 둔다. 비밀번호/비밀번호 확인 입력란에는 placeholder를 두지 않는다. -->
+    <form class="auth-form" id="signup-form" data-testid="signup-form" novalidate>
+      <div class="field">
+        <label class="field__label" for="signup-email">이메일</label>
+        <input class="field__input" type="text" id="signup-email" data-testid="signup-email" autocomplete="email"
+               placeholder="example@email.com">
+      </div>
+      <div class="field">
+        <label class="field__label" for="signup-password">비밀번호</label>
+        <input class="field__input" type="password" id="signup-password" data-testid="signup-password"
+               autocomplete="new-password">
+        <!-- 항상 보이는 고정 안내 문구다 — 에러 메시지와는 별개 요소이며 입력값에 따라 바뀌지 않는다 (PRD 21.12). -->
+        <p class="field__hint" data-testid="signup-password-hint">4자 이상 20자 이하로 입력해주세요.</p>
+      </div>
+      <div class="field">
+        <label class="field__label" for="signup-password-confirm">비밀번호 확인</label>
+        <!-- 일치 비교는 서버가 한다 (D39) — 프론트는 이 값을 password와 절대 비교하지 않고 그대로 전송만 한다
+             (PRD 21.6). 별도 helper text 없음 (PRD 21.1). -->
+        <input class="field__input" type="password" id="signup-password-confirm"
+               data-testid="signup-password-confirm" autocomplete="new-password">
+      </div>
+
+      <!-- 400·409·5xx·네트워크 오류를 모두 이 하나의 요소로 표시한다 (PRD 21.4/21.5/25.9).
+           새 400 메시지("비밀번호가 일치하지 않습니다.")도 이 기존 요소를 그대로 재사용한다 — 메시지별
+           분기 코드를 추가하지 않는다. -->
+      <div class="alert alert--error" data-testid="signup-error" id="signup-error" hidden role="alert">
+        <p class="alert__message" id="signup-error-message"></p>
+      </div>
+
+      <button class="btn btn--primary" type="submit" data-testid="signup-submit" id="signup-submit">회원가입</button>
+    </form>
+
+    <!-- 가입 성공 시 폼은 hidden, 이 안내가 보인다. 화면 이동은 하지 않는다 (PRD 21.3). -->
+    <div class="notice notice--success" data-testid="signup-success" id="signup-success" hidden>
+      <p class="notice__title">가입이 완료되었습니다</p>
+      <p class="notice__body">자동으로 로그인되지 않습니다. 로그인 화면에서 직접 로그인해 주세요.</p>
+      <p class="notice__action"><a href="/login.html" data-testid="signup-login-link">로그인 화면으로 가기</a></p>
+    </div>
+
+    <p class="auth-links">이미 계정이 있으신가요? <a href="/login.html">로그인</a></p>
+  </main>
+
+  <footer class="footer">
+    <p>하루상점 — 회원가입 화면</p>
+  </footer>
+
+  <script src="/cart-badge.js"></script>
+  <script src="/auth-header.js"></script>
+  <script src="/signup.js"></script>
+</body>
+</html>

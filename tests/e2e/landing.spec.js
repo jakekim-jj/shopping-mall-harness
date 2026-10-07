@@ -8,6 +8,9 @@
  *   - 카드 클릭    : PRD 5.1 ~ 5.5 (헤더 공통 요소 포함)
  *   - 상태 처리    : PRD 2.1 ~ 2.4
  *
+ * 구성 방식: BDD/시나리오 스타일 (auth-signup.spec.js 머릿말 참고). describe = 시나리오,
+ * 테스트 제목 끝 [ ]는 PRD 조항 각주, test-cases.ko.md 구조는 그대로 둔다.
+ *
  * 규칙 (skills/shopping-mall-qa/SKILL.md)
  *   - 선택자는 data-testid만 쓴다. CSS 클래스·텍스트로 요소를 찾지 않는다.
  *     예외는 링크의 href뿐이다 — href 값 자체가 PRD 5.1이 정한 계약이기 때문이다.
@@ -75,8 +78,12 @@ async function expectOnlyState(page, expected) {
   expect(visible).toEqual([expected]);
 }
 
-test.describe('상품 목록 화면 — 목록 표시 (PRD 1.1~1.5)', () => {
-  test('시드 상품 8개가 카드로 표시되고 이미지·이름·가격이 서버 값과 일치한다 (1.1/1.2/1.3)', async ({ request }) => {
+// ===========================================================================
+// 시나리오 1: 상품 목록을 둘러보는 방문자
+// [PRD 1.1~1.5]
+// ===========================================================================
+test.describe('시나리오: 상품 목록을 둘러보는 방문자', () => {
+  test('시드 상품 8개가 카드로 표시되고, 이미지·이름·가격이 서버 값과 일치한다 [1.1/1.2/1.3]', async ({ request }) => {
     const body = await (await request.get('/api/products')).json();
     const items = body.items;
     expect(items.length).toBe(8); // PRD 3.5 — 시드 6개 이상, 현재 8개
@@ -98,30 +105,33 @@ test.describe('상품 목록 화면 — 목록 표시 (PRD 1.1~1.5)', () => {
     await expectOnlyState(page, 'product-list');
   });
 
-  test('이미지 로드가 전부 실패해도 카드 높이가 정상 로드 때와 같다 (1.4)', async () => {
-    // 1) 정상 로드에서 카드별 높이를 먼저 잰다.
-    await page.goto('/');
-    await expect(page.getByTestId('product-card')).toHaveCount(8);
+  test('이미지 로드가 전부 실패해도, 카드 높이는 정상 로드 때와 같다 [1.4]', async () => {
+    await test.step('Given: 정상 로드에서 카드별 높이를 먼저 잰다', async () => {
+      await page.goto('/');
+      await expect(page.getByTestId('product-card')).toHaveCount(8);
+    });
     const normalHeights = await page
       .getByTestId('product-card')
       .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
 
-    // 2) 같은 화면을 이미지 요청만 전부 실패시킨 상태로 다시 연다.
-    await page.route('**/images/*', (route) => route.abort());
-    await page.goto('/');
-    await expect(page.getByTestId('product-card')).toHaveCount(8);
-    // 이미지 요소 자체는 DOM에 남아 있어야 한다 (대체 영역이 자리를 지킨다)
-    await expect(page.getByTestId('product-image')).toHaveCount(8);
+    await test.step('When: 이미지 요청만 전부 실패시킨 상태로 같은 화면을 다시 연다', async () => {
+      await page.route('**/images/*', (route) => route.abort());
+      await page.goto('/');
+      await expect(page.getByTestId('product-card')).toHaveCount(8);
+      // 이미지 요소 자체는 DOM에 남아 있어야 한다 (대체 영역이 자리를 지킨다)
+      await expect(page.getByTestId('product-image')).toHaveCount(8);
+    });
 
-    const brokenHeights = await page
-      .getByTestId('product-card')
-      .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
-
-    expect(brokenHeights).toEqual(normalHeights);
-    await expectOnlyState(page, 'product-list');
+    await test.step('Then: 카드 높이가 정상 로드 때와 똑같다', async () => {
+      const brokenHeights = await page
+        .getByTestId('product-card')
+        .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
+      expect(brokenHeights).toEqual(normalHeights);
+      await expectOnlyState(page, 'product-list');
+    });
   });
 
-  test('375px 모바일 폭에서 가로 스크롤이 생기지 않고 카드가 리스트 밖으로 삐져나오지 않는다 (1.5)', async () => {
+  test('375px 모바일 폭에서, 가로 스크롤이 생기지 않고 카드가 리스트 밖으로 삐져나오지 않는다 [1.5]', async () => {
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto('/');
     await expect(page.getByTestId('product-card')).toHaveCount(8);
@@ -144,8 +154,12 @@ test.describe('상품 목록 화면 — 목록 표시 (PRD 1.1~1.5)', () => {
   });
 });
 
-test.describe('상품 목록 화면 — 카드 클릭과 공통 헤더 (PRD 5.1~5.5)', () => {
-  test('카드는 실제 <a href="/product.html?id={id}"> 링크이고 클릭하면 상세로 이동한다 (5.1/5.3)', async ({ request }) => {
+// ===========================================================================
+// 시나리오 2: 카드를 클릭해 상세로 이동하는 방문자
+// [PRD 5.1~5.5]
+// ===========================================================================
+test.describe('시나리오: 카드를 클릭해 상세로 이동하는 방문자', () => {
+  test('카드는 실제 <a href> 링크이고, 클릭하면 상세 화면으로 이동한다 [5.1/5.3]', async ({ request }) => {
     const body = await (await request.get('/api/products')).json();
 
     await page.goto('/');
@@ -166,7 +180,7 @@ test.describe('상품 목록 화면 — 카드 클릭과 공통 헤더 (PRD 5.1~
     await expect(page.getByTestId('detail-name')).toBeVisible();
   });
 
-  test('목록 카드에는 "장바구니 담기" 버튼이 없다 — 클릭 대상은 상세 링크 하나뿐 (5.2)', async () => {
+  test('목록 카드에는 "장바구니 담기" 버튼이 없다 — 클릭 대상은 상세 링크 하나뿐이다 [5.2]', async () => {
     await page.goto('/');
     await expect(page.getByTestId('product-card')).toHaveCount(8);
 
@@ -176,7 +190,7 @@ test.describe('상품 목록 화면 — 카드 클릭과 공통 헤더 (PRD 5.1~
     await expect(page.locator('[data-testid="product-list"] a')).toHaveCount(8);
   });
 
-  test('헤더에 장바구니 링크가 있고, 비어 있으면 수량 배지는 DOM에 남되 보이지 않는다 (5.4/5.5)', async () => {
+  test('헤더에 장바구니 링크가 있고, 비어 있으면 수량 배지는 DOM에 남되 보이지 않는다 [5.4/5.5]', async () => {
     await page.goto('/');
 
     await expect(page.getByTestId('cart-link')).toHaveCount(1);
@@ -189,8 +203,12 @@ test.describe('상품 목록 화면 — 카드 클릭과 공통 헤더 (PRD 5.1~
   });
 });
 
-test.describe('상품 목록 화면 — 상태 처리 (PRD 2.1~2.4)', () => {
-  test('응답을 기다리는 동안 로딩 상태만 보인다 (2.1/2.4)', async () => {
+// ===========================================================================
+// 시나리오 3: 목록 API나 장바구니 조회가 느리거나 실패하는 상황
+// [PRD 2.1~2.4 · 5.7]
+// ===========================================================================
+test.describe('시나리오: 목록 API나 장바구니 조회가 느리거나 실패하는 상황', () => {
+  test('응답을 기다리는 동안은, 로딩 상태만 보인다 [2.1/2.4]', async () => {
     await page.route('**/api/products', async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await route.continue();
@@ -202,7 +220,7 @@ test.describe('상품 목록 화면 — 상태 처리 (PRD 2.1~2.4)', () => {
     await expect(page.getByTestId('product-card')).toHaveCount(0);
   });
 
-  test('상품이 0개면 에러가 아니라 빈 상태만 보이고 카드는 0개다 (2.2/2.4)', async () => {
+  test('상품이 0개면, 에러가 아니라 빈 상태만 보이고 카드는 0개다 [2.2/2.4]', async () => {
     // 고정 fixture가 아니라 실서버의 ?simulate=empty 응답을 그대로 쓴다 (QA 리포트 §1 재현 방식)
     await page.route('**/api/products', async (route) => {
       const response = await route.fetch({
@@ -217,7 +235,7 @@ test.describe('상품 목록 화면 — 상태 처리 (PRD 2.1~2.4)', () => {
     await expectOnlyState(page, 'empty-state');
   });
 
-  test('목록 API가 500이면 에러 상태만 보이고 화면이 백지가 되지 않는다 (2.3/2.4)', async () => {
+  test('목록 API가 500이면, 에러 상태만 보이고 화면이 백지가 되지 않는다 [2.3/2.4]', async () => {
     await page.route('**/api/products', async (route) => {
       const response = await route.fetch({
         url: 'http://localhost:3000/api/products?simulate=error',
@@ -233,7 +251,7 @@ test.describe('상품 목록 화면 — 상태 처리 (PRD 2.1~2.4)', () => {
     await expect(page.getByTestId('error-state')).not.toBeEmpty();
   });
 
-  test('장바구니 조회가 실패해도 상품 목록은 정상 렌더되고 배지만 숨겨진다 (5.7)', async () => {
+  test('장바구니 조회가 실패해도, 상품 목록은 정상 렌더되고 배지만 숨겨진다 [5.7]', async () => {
     await page.route('**/api/cart', (route) =>
       route.fulfill({
         status: 500,
