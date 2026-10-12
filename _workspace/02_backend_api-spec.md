@@ -1,14 +1,31 @@
-# 백엔드 API 스펙 — 상품 목록 / 상품 상세 / 장바구니 / 모의 결제 / 회원가입·로그인
+# 백엔드 API 스펙 — 상품 목록 / 상품 상세 / 장바구니 / 모의 결제 / 회원가입·로그인 / 상품 리뷰
 
 > 작성: backend-agent / 2026-08-05 (1차: 상품 목록)
 > 개정: backend-agent / 2026-08-08 (2차: 상품 상세 + 장바구니 5개 엔드포인트 추가)
 > 개정: backend-agent / 2026-08-09 (**3차: `DELETE /api/cart` 전체 비우기 + 수량 기반 자동 할인**)
 > 개정: backend-agent / 2026-08-10 (**4차: `POST /api/checkout` 모의 결제 + `GET /api/orders/:orderId` 주문 조회**)
 > 개정: backend-agent / 2026-10-06 (**5차: `/api/auth/*` 회원가입·로그인·로그아웃·상태조회 4개 엔드포인트 추가**)
+> 개정: backend-agent / 2026-10-11 (**6차: 상품 리뷰/평점 4개 엔드포인트 추가 — `GET`/`POST /api/products/:productId/reviews`, `PATCH`/`DELETE /api/reviews/:reviewId`**)
 > 입력: `_workspace/01_planner_prd.md`
 > **이 문서는 frontend-agent가 그대로 믿고 코딩해도 되는 계약(contract)이다.**
 > 여기 적힌 필드명·래핑·상태 코드는 실제 구동 중인 서버에서 curl로 검증된 값이다.
 > 백엔드가 shape을 바꿔야 할 사정이 생기면, 코드를 고치기 전에 이 문서를 먼저 고치고 frontend-agent에게 알린다.
+
+---
+
+## 🚨 6차 사이클 — frontend-agent가 **반드시 먼저 읽어야 할 핵심 규칙** (2026-10-11)
+
+**이번 사이클은 기존 13개 엔드포인트의 shape을 하나도 바꾸지 않는다.** `GET /api/products`·`GET /api/products/:id` 응답에 `averageRating`·`reviewCount`를 **얹지 않았다** — 5개 필드 그대로다. 평점은 **리뷰 목록 응답에만** 존재한다.
+
+> **네 엔드포인트가 전부 같은 "리뷰 스냅샷" shape을 반환한다**: `{ reviews: [...], averageRating, reviewCount }`. 단건(`{ review: {...} }`)을 반환하는 엔드포인트는 없다 — 작성/수정/삭제 응답도 **전체 스냅샷**이므로 frontend는 쓰기 성공 후 `GET`을 다시 호출할 필요가 없다.
+
+> **🔑 조회(`GET`)는 완전 공개, 쓰기(`POST`/`PATCH`/`DELETE`)만 로그인 필수다.** `GET /api/products/:productId/reviews`는 세션이 없어도 **200**이다 — 세션이 없으면 모든 줄의 `isMine`이 `false`가 될 뿐이다. **같은 경로의 `GET`과 `POST`가 인증 요구가 다르므로**, 경로 단위로 "로그인 필요"를 판단하지 말 것.
+
+> **🔑 존재하지 않는 리뷰 = 404, 존재하지만 남의 리뷰 = 403이다.** 주문 조회(`GET /api/orders/:orderId`)가 두 경우 모두 404로 뭉개는 것과 **일부러 다르다** — 리뷰는 혼동하지 말 것.
+
+> `isMine`은 서버가 계산해서 내려준다. **frontend는 로그인한 이메일과 `review.email`을 직접 비교하는 코드를 만들지 않는다** — `/api/auth/me` 응답과 리뷰 목록 응답이 서로 다른 시점에 도착하면 그 비교가 경쟁 조건을 만든다. 버튼(수정/삭제) 노출 여부는 **오직 `review.isMine === true`** 로만 판정할 것.
+
+새 메시지 6종, 재사용 메시지 3종(401 "로그인이 필요합니다.", 404 "상품을 찾을 수 없습니다.", 그리고 신규 404 "리뷰를 찾을 수 없습니다.") — 전체 메시지 표는 **§2P~2R 공통 규약**을 볼 것. 상세는 **§2P~§2R**.
 
 ---
 
@@ -86,22 +103,28 @@ npm start       # → http://localhost:3000
 | POST | `/api/auth/login` | **로그인 — 세션 발급** | **5차** | ✅ 구현 완료 (§2M) |
 | POST | `/api/auth/logout` | **로그아웃 — 세션 폐기** | **5차** | ✅ 구현 완료 (§2N) |
 | GET | `/api/auth/me` | **현재 로그인 상태 조회** | **5차** | ✅ 구현 완료 (§2O) |
+| GET | `/api/products/:productId/reviews` | **리뷰 목록 + 평균 평점 조회** (비로그인도 200) | **6차** | ✅ 구현 완료 (§2P) |
+| POST | `/api/products/:productId/reviews` | **리뷰 작성** (로그인 필수) | **6차** | ✅ 구현 완료 (§2Q) |
+| PATCH | `/api/reviews/:reviewId` | **리뷰 수정 — 본인만** (로그인 필수) | **6차** | ✅ 구현 완료 (§2R) |
+| DELETE | `/api/reviews/:reviewId` | **리뷰 삭제 — 본인만** (로그인 필수) | **6차** | ✅ 구현 완료 (§2R) |
 
 ~~**이번 범위의 API는 위 6개가 전부다** (PRD 9.12).~~
 ~~🔁 **[3차 개정 — 2026-08-09] 위 문장은 폐기된다. 이번 범위의 API는 총 7개다** (PRD 13.8).~~
 ~~🔁 **[4차 개정 — 2026-08-10] 위 두 문장 모두 폐기된다. 이번 범위의 API는 총 9개다** (PRD 18.13).~~
+~~🔁 **[5차 개정 — 2026-10-06] 위 세 문장 모두 폐기된다. 이번 범위의 API는 총 13개다** (PRD 24.14).~~
 
-> 🔁 **[5차 개정 — 2026-10-06] 위 세 문장 모두 폐기된다. 이번 범위의 API는 총 13개다** (PRD 24.14). `/api/auth/*` 4개(회원가입·로그인·로그아웃·상태조회)가 범위로 편입되었다 (§2L~§2O). 기존 9개의 경로·메서드·응답 shape은 **하나도 바뀌지 않았다** — 실제 회귀 검증 완료(§5-5).
+> 🔁 **[6차 개정 — 2026-10-11] 위 네 문장 모두 폐기된다. 이번 범위의 API는 총 17개다** (PRD 30.14). `/api/products/:productId/reviews`(GET/POST) + `/api/reviews/:reviewId`(PATCH/DELETE) 4개가 범위로 편입되었다 (§2P~§2R). 기존 13개의 경로·메서드·응답 shape은 **하나도 바뀌지 않았다** — 실제 회귀 검증 완료(§5-7).
 
-`GET /api/orders`(목록), 주문 취소/환불, 실제 PG 연동(승인 API·웹훅·`returnUrl` 등), 쿠폰/프로모션 코드, 배송 관련 엔드포인트, 비밀번호 재설정·소셜 로그인·회원정보 수정·탈퇴·회원별 주문내역 엔드포인트는 **5차에도 구현하지 않았다** — frontend-agent는 이 경로들을 호출하는 코드를 작성하지 말 것. 호출하면 아래처럼 404 JSON이 돌아온다.
+`GET /api/orders`(목록), 주문 취소/환불, 실제 PG 연동(승인 API·웹훅·`returnUrl` 등), 쿠폰/프로모션 코드, 배송 관련 엔드포인트, 비밀번호 재설정·소셜 로그인·회원정보 수정·탈퇴·회원별 주문내역 엔드포인트, **리뷰 사진/투표/신고/판매자 답글, 전체 리뷰 목록(`GET /api/reviews`), 내가 쓴 리뷰 목록, 평점 통계·정렬·필터, 리뷰-주문 연결 엔드포인트**는 **6차에도 구현하지 않았다** — frontend-agent는 이 경로들을 호출하는 코드를 작성하지 말 것. 호출하면 아래처럼 404 JSON이 돌아온다.
 
 ```
 GET /api/orders  →  404
 PATCH /api/auth/me  →  404
+GET /api/reviews  →  404
 { "error": { "message": "존재하지 않는 API 경로입니다." } }
 ```
 
-> 1차 문서의 "이번 범위에는 `GET /api/products` 하나뿐"이라는 문장은 위 표로 대체되었다. **§2(GET /api/products)의 스펙 자체는 5차에도 한 글자도 바뀌지 않았다.** §2A~§2K의 경로·메서드·상태 코드·래핑도 전부 그대로이며, 5차에서 추가된 것은 **§2L~§2O(회원가입/로그인/로그아웃/상태조회) 4개 엔드포인트뿐**이다.
+> 1차 문서의 "이번 범위에는 `GET /api/products` 하나뿐"이라는 문장은 위 표로 대체되었다. **§2(GET /api/products)의 스펙 자체는 6차에도 한 글자도 바뀌지 않았다.** §2A~§2O의 경로·메서드·상태 코드·래핑도 전부 그대로이며, 6차에서 추가된 것은 **§2P~§2R(리뷰 조회/작성/수정·삭제) 4개 엔드포인트뿐**이다.
 
 ---
 
@@ -1021,7 +1044,183 @@ Cookie: sessionId=<uuid 또는 없음>
 
 ---
 
+## 2P~2R. 상품 리뷰 / 평점 (6차 신규)
+
+### 공통 규약 — 네 엔드포인트가 전부 같은 스냅샷을 반환한다
+
+```json
+{
+  "reviews": [
+    { "reviewId": "3f2a1c9e-...", "productId": "p1", "email": "review1@ex.com",
+      "rating": 5, "content": "배송이 빠르고 품질도 좋았습니다.",
+      "createdAt": "2026-10-11T03:13:56.674Z", "isMine": true }
+  ],
+  "averageRating": 4.5,
+  "reviewCount": 2
+}
+```
+
 | 결정 | 확정값 | 절대 하지 말 것 |
+|---|---|---|
+| 래핑 키 | **`reviews`** (top-level 정확히 3개: `reviews`/`averageRating`/`reviewCount`) | `items` 아님 — `items`는 상품 목록·장바구니 줄이 이미 쓰고 있어서 리뷰까지 쓰면 호출부를 봐야 뭔지 알 수 있게 된다 |
+| 리뷰 줄 키 | 정확히 **7개** — `reviewId`/`productId`/`email`/`rating`/`content`/`createdAt`/`isMine` | `updatedAt`·`nickname`·`helpfulCount`·`isPurchased`·`imageUrl` 없음 |
+| 리뷰 0개 | `{ "reviews": [], "averageRating": null, "reviewCount": 0 }` + **200** | 404 아님 (빈 장바구니와 같은 판단) |
+| `averageRating` | **0개면 `null`.** number 타입, 소수 첫째 자리 반올림 | `0`으로 두지 않는다 — 평점 최솟값이 1이라 `0`은 "모두가 0점"과 "리뷰 없음"을 구별 못 하게 만든다 |
+| `reviewCount` | **0개면 `0`** (`null` 아님) | `averageRating`과 반대 규칙이다. 헷갈리지 말 것 |
+| `isMine` | 서버가 세션과 `review.email`을 비교해 계산. **항상 boolean**, 세션 없으면 전부 `false` | `null`/`undefined` 없음. 프론트가 직접 이메일을 비교하지 않는다 |
+| 목록 순서 | `createdAt` **내림차순(최신순)** | 정렬·필터·페이지네이션 쿼리 파라미터(`?sort=`·`?page=`) 없음 — 보내도 전부 무시된다 |
+| 쓰기 응답 | **단건이 아니라 전체 스냅샷** (작성/수정/삭제 모두) | `GET`을 다시 호출할 필요 없음 |
+| 쿠키 | 리뷰 응답에 **`cartId`가 절대 실리지 않는다**. 리뷰 엔드포인트는 `ensureCartId()`를 호출하지 않는다 | `sessionId` 폐기 헤더는 무효 세션을 만났을 때는 나갈 수 있다 |
+
+### 메시지 전체 목록 (6차 추가분 — 신규 6종 + 재사용 3종)
+
+| 상태 | 메시지 | 엔드포인트 | 신규? |
+|---|---|---|---|
+| 400 | `평점은 1 이상 5 이하의 정수로 입력해 주세요.` | POST / PATCH | 신규 |
+| 400 | `리뷰 내용을 입력해 주세요.` | POST / PATCH | 신규 |
+| 400 | `리뷰 내용은 500자 이하로 입력해 주세요.` | POST / PATCH | 신규 |
+| 401 | `로그인이 필요합니다.` | POST / PATCH / DELETE | 재사용 (5차 로그아웃과 동일) |
+| 403 | `본인이 작성한 리뷰만 수정하거나 삭제할 수 있습니다.` | PATCH / DELETE | **신규 (403 자체가 신규 상태 코드)** |
+| 404 | `상품을 찾을 수 없습니다.` | GET / POST (없는 productId) | 재사용 (2차 상품 상세와 동일) |
+| 404 | `리뷰를 찾을 수 없습니다.` | PATCH / DELETE (없는 reviewId) | 신규 |
+| 409 | `이미 이 상품에 리뷰를 작성했습니다.` | POST | 신규 |
+| 500 | `리뷰 요청을 처리하지 못했습니다.` | 리뷰 경로 전체 | 신규 |
+
+---
+
+## 2P. GET /api/products/:productId/reviews — 리뷰 목록 + 평균 평점 조회
+
+### 요청
+
+```
+GET /api/products/p1/reviews HTTP/1.1
+Cookie: sessionId=<uuid 또는 없음>   ← 없어도 된다 (로그인 불필요)
+```
+
+쿼리 파라미터(`?sort=`·`?page=`·`?limit=`·`?rating=`)는 전부 무시한다.
+
+### 응답 (200) — 항상 이 shape, **비로그인도 200**
+
+```json
+{
+  "reviews": [
+    { "reviewId": "3f2a1c9e-...", "productId": "p1", "email": "review1@ex.com",
+      "rating": 5, "content": "배송이 빠르고 품질도 좋았습니다.",
+      "createdAt": "2026-10-11T03:13:56.674Z", "isMine": false }
+  ],
+  "averageRating": 5,
+  "reviewCount": 1
+}
+```
+
+- 세션이 유효하면 작성자와 일치하는 줄만 `isMine: true`. 세션이 없거나 **위조/만료**된 쿠키여도 **401이 아니라 200** — 그냥 전부 `isMine: false`가 된다. 위조/만료였다면 `sessionId` 폐기 헤더(`Max-Age=0`)가 같은 응답에 실린다(세션 Map에서 삭제까지 됨).
+- 리뷰가 0개인 상품: `{ "reviews": [], "averageRating": null, "reviewCount": 0 }` — **200**이다.
+
+### 응답 (404) — 존재하지 않는 productId
+
+```json
+{ "error": { "message": "상품을 찾을 수 없습니다." } }
+```
+
+2차(`GET /api/products/:id`)와 **글자 그대로 같은 문구**를 재사용한다.
+
+---
+
+## 2Q. POST /api/products/:productId/reviews — 리뷰 작성
+
+### 요청
+
+```
+POST /api/products/p1/reviews HTTP/1.1
+Cookie: sessionId=<uuid>   ← 필수, 없으면 401
+Content-Type: application/json
+
+{ "rating": 5, "content": "좋습니다." }
+```
+
+- 요청 body는 **정확히 2개 필드**만 쓴다. `email`·`productId`·`createdAt`·`reviewId`가 실려 와도 전부 무시한다 — **작성자는 세션에서, 대상 상품은 URL 경로에서** 결정한다. body에 남의 `email`을 실어 보내도 세션의 이메일로 저장된다(사칭 불가).
+- `rating`은 **number 정수**다. 문자열 `"5"`는 400이다.
+
+### 응답 (201) — 성공. **Set-Cookie 없음**
+
+```json
+{
+  "reviews": [
+    { "reviewId": "<새 uuid>", "productId": "p1", "email": "review1@ex.com",
+      "rating": 5, "content": "좋습니다.", "createdAt": "2026-10-11T...", "isMine": true },
+    { "...이전 리뷰들..." }
+  ],
+  "averageRating": 4.5,
+  "reviewCount": 2
+}
+```
+
+방금 쓴 리뷰가 **`reviews[0]`**(맨 앞)이고 `isMine: true`다. 갱신된 전체 스냅샷을 돌려주므로 **`GET`을 다시 호출하지 않는다.**
+
+### 검증 순서: 세션(401) → 상품 존재(404) → 입력 검증(400) → 중복(409)
+
+```
+세션 없음/위조/만료       →  401  { "error": { "message": "로그인이 필요합니다." } }
+없는 productId           →  404  { "error": { "message": "상품을 찾을 수 없습니다." } }
+rating이 1~5 정수가 아님   →  400  { "error": { "message": "평점은 1 이상 5 이하의 정수로 입력해 주세요." } }
+content 누락/공백만        →  400  { "error": { "message": "리뷰 내용을 입력해 주세요." } }
+content가 trim 후 501자+  →  400  { "error": { "message": "리뷰 내용은 500자 이하로 입력해 주세요." } }
+이미 이 상품에 내 리뷰 있음 →  409  { "error": { "message": "이미 이 상품에 리뷰를 작성했습니다." } }
+```
+
+- `rating` 경계: `0`→400, `1`→201, `5`→201, `6`→400, `4.5`→400, `"5"`(문자열)→400. 실제 실측: §5-7.
+- `content` 길이 경계(**trim 후** 기준): 1자→201, 500자→201, 501자→400. `content`는 **trim해서 저장**하지만 내부 공백·개행은 보존한다.
+- 🚨 409일 때 **기존 리뷰를 덮어쓰지 않는다** — `rating`/`content`/`createdAt` 중 아무것도 바뀌지 않는다(핸들러에서 중복 체크 후 즉시 `return`하므로 `reviews.set()`에 닿지 않는다). 실측 확인: §5-7.
+- 판정 키는 `(productId, email)` 쌍이다 — **다른 상품에는 쓸 수 있다.**
+
+---
+
+## 2R. PATCH / DELETE /api/reviews/:reviewId — 수정 / 삭제, 본인만
+
+reviewId가 전역에서 유일하므로(단일 `Map` 키) 상품 경로를 반복하지 않는다 — `PATCH /api/cart/items/:productId`가 상품 경로 하나로 줄을 지목하는 것과 같은 판단이다.
+
+### 요청
+
+```
+PATCH /api/reviews/<reviewId> HTTP/1.1
+Cookie: sessionId=<uuid>   ← 필수, 없으면 401
+Content-Type: application/json
+
+{ "rating": 4, "content": "다시 써봅니다." }
+```
+
+```
+DELETE /api/reviews/<reviewId> HTTP/1.1
+Cookie: sessionId=<uuid>   ← 필수, 없으면 401
+(body 없음)
+```
+
+- `PATCH`는 `rating`·`content` **둘 다 필수**다 — 부분 수정 불가. 한쪽만 보내면 없는 쪽의 400 메시지가 나간다.
+- `DELETE`는 body를 받지 않는다. 실려 와도 무시한다.
+
+### 🔑 검증 순서 (이번 사이클의 핵심 조항) — 세션(401) → **reviewId 존재(404)** → **소유권(403)** → (PATCH만) 입력(400)
+
+```
+세션 없음/위조/만료          →  401  { "error": { "message": "로그인이 필요합니다." } }
+reviewId가 저장소에 없음      →  404  { "error": { "message": "리뷰를 찾을 수 없습니다." } }
+리뷰는 있지만 남의 것        →  403  { "error": { "message": "본인이 작성한 리뷰만 수정하거나 삭제할 수 있습니다." } }
+(PATCH만) 입력 검증 실패     →  400  ← POST와 글자 그대로 같은 3종 메시지
+```
+
+> 🚨 **존재하지 않는 리뷰 = 404, 존재하지만 남의 리뷰 = 403 — 절대 섞지 않는다.** `GET /api/orders/:orderId`(주문 조회)는 "없는 주문"과 "남의 주문"을 **똑같이 404**로 처리하지만, 리뷰는 **의도적으로 반대**다. 리뷰는 `GET`으로 전원에게 공개되어 있어 `reviewId`를 숨길 이유가 없으므로(이미 노출됨), 403으로 "존재하지만 권한 없음"을 솔직하게 알려준다. 두 엔드포인트의 이 차이를 "일관성 있게" 통일하지 말 것 — frontend-agent/qa-agent 모두 주의.
+
+### 응답 (200) — 성공. `GET`과 완전히 동일한 shape의 **전체 스냅샷**
+
+```json
+{ "reviews": [ { "...수정된 리뷰..." }, "..." ], "averageRating": 4, "reviewCount": 2 }
+```
+
+- **`PATCH` 성공**: `rating`/`content`만 교체된다. `reviewId`/`productId`/`email`/`createdAt`은 **절대 바뀌지 않는다** — 특히 `createdAt`이 그대로이므로 **목록 순서도 바뀌지 않는다**. body에 `createdAt`/`email`/`productId`를 실어 보내도 무시된다.
+- **`DELETE` 성공**: 그 리뷰가 빠진 스냅샷. **204가 아니라 200 + body**(갱신된 평균·개수를 프론트가 받아야 하므로, `DELETE /api/cart/items/:productId`와 같은 판단). 마지막 리뷰를 지우면 `{ "reviews": [], "averageRating": null, "reviewCount": 0 }`.
+- ⚠️ **멱등하지 않다.** 같은 `reviewId`로 `DELETE`를 두 번 호출하면 **200 → 404**다(이미 지워졌으므로). `POST /api/auth/logout`의 200→401, `POST /api/checkout`의 200→409와 같은 패턴.
+- **403 뒤에는 서버 상태가 전혀 바뀌지 않는다** — 그 리뷰를 다시 `GET`으로 조회하면 원래 값 그대로다. 실측: §5-7.
+
+---
 |---|---|---|
 | 목록 래핑 | **`{ "items": [...] }`** | top-level 배열(`[ {...} ]`)로 파싱하지 말 것. `res.json()`의 결과는 배열이 아니라 객체다 |
 | 빈 목록 | `{ "items": [] }` + **200** | 404·500으로 처리하거나 `items`를 `null`로 두지 않는다 |
@@ -1540,12 +1739,97 @@ password="    "(공백 4자), passwordConfirm="    " (동일) → 201  ✅
 
 ---
 
+### 5-7. 6차 검증 기록 (2026-10-11, 실제 실행 결과 — `node server.js`, 포트 3000)
+
+두 계정(`review1@ex.com`, `review2@ex.com`)으로 가입·로그인한 뒤 쿠키 항아리 2개(`jar1`/`jar2`)로 소유권 경계(403)까지 전부 실제로 호출해 확인했다.
+
+```
+① 리뷰 0개 상품 조회 (p3)
+GET /api/products/p3/reviews
+→ 200 {"reviews":[],"averageRating":null,"reviewCount":0}  ✅ (404가 아니다)
+
+② 비로그인 작성 시도
+POST /api/products/p1/reviews {"rating":5,"content":"좋아요"}  (쿠키 없음)
+→ 401 {"error":{"message":"로그인이 필요합니다."}}  ✅
+
+③ user1 정상 작성(201) → user2 정상 작성(201) → 조회로 반영 확인
+POST(user1) → 201 {"reviews":[{...isMine:true}],"averageRating":5,"reviewCount":1}
+POST(user2) → 201 {"reviews":[{user2...isMine:true},{user1...isMine:false}],"averageRating":4.5,"reviewCount":2}
+GET(쿠키없음) → 두 줄 다 isMine:false, averageRating:4.5, reviewCount:2, 순서는 user2(최신)가 0번째  ✅
+  → 최신순(createdAt 내림차순) 확인, isMine이 "보는 사람"에 따라 다름을 확인 (G2)
+
+④ 중복 작성 → 409, 기존 리뷰 불변
+POST(user1, p1에 재작성) → 409 {"error":{"message":"이미 이 상품에 리뷰를 작성했습니다."}}  ✅
+→ 뒤이어 GET으로 대조 → user1의 rating/content/createdAt이 ③ 시점 그대로임을 확인 (F6)  ✅
+
+⑤ 평점 범위 밖 → 400 (전부 같은 메시지)
+rating:0   → 400 "평점은 1 이상 5 이하의 정수로 입력해 주세요."  ✅
+rating:6   → 400 (동일 메시지)  ✅
+rating:"abc" → 400 (동일 메시지, 문자열은 정수가 아니므로 Number.isInteger가 false)  ✅
+
+⑥ 본문 경계값 (trim 후 길이 기준)
+content:""     → 400 "리뷰 내용을 입력해 주세요."  ✅
+content: 'a'×501 → 400 "리뷰 내용은 500자 이하로 입력해 주세요."  ✅
+content: 'a'×500 → 201 성공  ✅ (500자는 통과, 501자부터 거절 — 경계 정확)
+
+⑦ 🔑 403과 404 대조 (이번 사이클의 핵심 — D46)
+user2가 user1의 리뷰를 PATCH/DELETE 시도
+→ 둘 다 403 {"error":{"message":"본인이 작성한 리뷰만 수정하거나 삭제할 수 있습니다."}}  ✅
+→ 403 뒤에 GET으로 대조 → user1 리뷰의 rating/content/createdAt이 원래 값 그대로, 삭제도 안 됐음 확인 (G10)  ✅
+임의 UUID(00000000-...)로 PATCH/DELETE
+→ 둘 다 404 {"error":{"message":"리뷰를 찾을 수 없습니다."}}  ✅
+→ 403과 404가 상태 코드·메시지 모두 다름을 직접 대조 확인 (G8)  ✅
+
+⑧ 본인 수정/삭제 성공
+user1이 자신의 리뷰 PATCH(rating:3, content:"수정된 내용")
+→ 200, rating/content만 교체, createdAt 불변 → 목록에서 여전히 같은 위치(순서 안 바뀜, G5)  ✅
+→ averageRating이 즉시 새 값(3.5)으로 재계산됨 (G4)  ✅
+user1이 자신의 리뷰 DELETE
+→ 200, 그 리뷰가 빠진 스냅샷, averageRating 재계산(4), reviewCount 1로 감소  ✅
+
+⑨ Product 응답 불변 확인 (D47)
+GET /api/products       → 각 item 키: ['description','id','imageUrl','name','price']  — 정확히 5개, 평점 필드 없음  ✅
+GET /api/products/:id   → item 키: 동일 5개  ✅ (리뷰를 작성한 뒤에도 평점 필드가 추가되지 않음 확인)
+
+⑩ 위조 sessionId로 GET 리뷰 조회
+Cookie: sessionId=00000000-...(존재하지 않는 값)
+→ 200, 모든 줄 isMine:false, Set-Cookie: sessionId=;...;Max-Age=0 (폐기) 동반, 401 아님  ✅ (E6)
+
+⑪ 쿠키 격리 확인 — 리뷰 응답에 cartId가 없다
+GET /api/products/p1/reviews, POST /api/products/p3/reviews(로그인 상태) 모두 응답 헤더에 cartId Set-Cookie 없음 확인  ✅ (H5)
+
+⑫ 기존 13개 엔드포인트 회귀
+GET /api/cart → 200, POST /api/cart/items → 200, GET /api/auth/me(user1) → 200 {"user":{...}},
+POST /api/auth/logout(user1) → 200 {"user":null}  — 전부 기존과 동일하게 동작  ✅ (H1/H2)
+```
+
+🔑 **G8(403/404 직접 대조)과 G7(버튼 없이 API 직접 호출로 403 유도)을 실제로 실행해 확인했다** — 이번 사이클이 요구하는 가장 중요한 두 케이스다.
+
+🐛 **작업 시작 전 `docs/bug-history/` 2개 문서를 확인했고, 둘 다 이번 사이클에 직접 해당했다.**
+- **M5(공용 에러 핸들러 문구) — 세 번째 재발 지점으로 직접 반영.** PRD 30.18이 "`/api/products/:productId/reviews`가 `/api/products` 접두어를 공유하므로 분기 순서가 요구사항"이라고 명시했다. 기존 핸들러가 `req.path.startsWith('/api/products')`를 먼저 검사하는 구조라 그대로 뒀다면 리뷰 요청의 500도 "상품 목록을 불러오지 못했습니다."를 물려받았을 것이다. `isReviewRequestPath()` 함수를 만들어 **`/api/products` 분기보다 먼저** 검사하도록 순서를 고정했다(`server.js`의 에러 핸들러). 단위 테스트로 `/api/products/p1/reviews`·`/api/reviews/abc` → true, `/api/products`·`/api/products/p1` → false를 직접 확인했다(아래 코드 재실행 결과).
+- **M4(쿠키 최초 발급 경쟁 조건) — 재발 조건 아님으로 판단, 구조로 차단.** PRD 30.15가 "리뷰 경로 하나가 상품 경로 접두어를 공유하므로 M4가 실수로 상속될 수 있다"고 경고했다. 하지만 이 서버는 **경로 단위 공용 전처리 미들웨어가 없고** `ensureCartId()`를 호출하는 지점이 장바구니·결제·주문 핸들러 내부로 끝까지 하나뿐이다 — 리뷰 4개 핸들러(`server.js`)에 `ensureCartId`·`cartId`라는 식별자가 전혀 등장하지 않음을 코드로 직접 확인했다. 상품 상세 화면이 로드 시 4개 요청(상품/장바구니/인증/리뷰)을 병렬로 쏘더라도, `cartId`를 발급할 수 있는 코드 경로 자체가 하나뿐이므로 경쟁이 성립할 수 없다.
+
+```bash
+node -e "
+function isReviewRequestPath(path) {
+  return path.startsWith('/api/reviews') || /^\/api\/products\/[^/]+\/reviews(?:\/|\$)/.test(path);
+}
+console.log(isReviewRequestPath('/api/products/p1/reviews'));  // true
+console.log(isReviewRequestPath('/api/reviews/abc-123'));      // true
+console.log(isReviewRequestPath('/api/products'));              // false
+console.log(isReviewRequestPath('/api/products/p1'));           // false
+"
+# → true / true / false / false  ✅ (products 분기와 겹치지 않음을 확인)
+```
+
+---
+
 ## 6. 파일 위치
 
 | 파일 | 역할 |
 |---|---|
-| `package.json` | `npm start` → `node server.js`, 의존성 `express@^4.19.2` (**5차에서도 새 의존성 추가 없음** — `crypto`는 Node 내장) |
-| `server.js` | Express 앱. 정적 서빙 + `express.json()` + **API 13개**(3차: `DELETE /api/cart` 추가, 4차: `POST /api/checkout` + `GET /api/orders/:orderId` 추가, **5차: `/api/auth/*` 4개 추가**) + 장바구니 저장소(`Map<cartId, CartItem[]>`) + 주문 저장소(`Map<orderId, Order>`) + **회원·세션 저장소(`Map<normalizedEmail, User>` + `Map<sessionId, Session>`, 5차 신규)** + 할인 계산(`buildCartLine`/`buildCartSnapshot`) + 주문번호 발급(`generateOrderId`) + **비밀번호 해시(`hashPassword`/`verifyPassword`) + 세션 조회(`resolveSession`/`findSession`) + 응답 변환(`toUserResponse`), 5차 신규** + 에러 핸들러. **5차에서도 새 파일·새 의존성 없음** |
+| `package.json` | `npm start` → `node server.js`, 의존성 `express@^4.19.2` (**5·6차 모두 새 의존성 추가 없음** — `crypto`는 Node 내장) |
+| `server.js` | Express 앱. 정적 서빙 + `express.json()` + **API 17개**(3차: `DELETE /api/cart` 추가, 4차: `POST /api/checkout` + `GET /api/orders/:orderId` 추가, 5차: `/api/auth/*` 4개 추가, **6차: 리뷰 4개 추가**) + 장바구니 저장소(`Map<cartId, CartItem[]>`) + 주문 저장소(`Map<orderId, Order>`) + 회원·세션 저장소(`Map<normalizedEmail, User>` + `Map<sessionId, Session>`, 5차) + **리뷰 저장소(`Map<reviewId, Review>`, 6차 신규)** + 할인 계산(`buildCartLine`/`buildCartSnapshot`) + 주문번호 발급(`generateOrderId`) + 비밀번호 해시(`hashPassword`/`verifyPassword`) + 세션 조회(`resolveSession`/`findSession`) + 응답 변환(`toUserResponse`, 5차) + **리뷰 입력 검증(`isValidRating`/`validateReviewInput`) + 중복 판정(`hasReviewByEmail`) + 응답 변환(`toReviewSnapshot`), 6차 신규** + 에러 핸들러(**6차: `isReviewRequestPath()`로 리뷰 분기를 상품 분기보다 먼저 검사**). **5·6차 모두 새 파일·새 의존성 없음** |
 | `data/products.js` | 시드 상품 8개 (`module.exports = { products }`) — **2차 이후 변경 없음** |
 | `public/images/p1.svg` … `p8.svg` | 상품 플레이스홀더 이미지 (백엔드 생성, 외부 네트워크 불필요) |
 | `public/index.html` | frontend-agent가 만든 목록 화면. `/`에서 서빙 중 |
@@ -1617,6 +1901,21 @@ password="    "(공백 4자), passwordConfirm="    " (동일) → 201  ✅
 - `/api/auth/login` 핸들러와 `toUserResponse()`는 **전혀 수정하지 않았다.** 로그인 요청 destructuring은 여전히 `const { email, password } = body;`이며 `passwordConfirm`이라는 식별자가 로그인 라우트 코드에 등장하지 않는다 — 요청에 그 필드가 실려 와도 애초에 변수로 꺼내지 않으므로 "읽지도, 비교하지도 않는다"(PRD 24.5)는 요구가 코드 구조로 보장된다.
 - curl 실측 전체 기록은 §5-6 참고.
 
+### 6차 구현 메모 (backend-agent → qa-agent / frontend-agent)
+
+- **작업 시작 전 `docs/bug-history/` 3개 문서를 전부 다시 확인했다.** 이번 사이클은 특히 M5와 직접 관련이 있었다.
+  - 🐛 **BUG-2026-08-08-02 (M5, 공용 에러 핸들러 문구) — 세 번째 재발 지점으로 직접 반영, 이번 사이클 최우선 과제.** 과거 두 번(3차 `DELETE /api/cart`, 4차 `/api/checkout`·`/api/orders`, 5차 `/api/auth`)과 달리, 이번엔 "새 경로가 기존 경로 접두어를 공유"하는 **새로운 형태**로 재발 조건이 왔다. `/api/products/:productId/reviews`가 `startsWith('/api/products')`에 걸리므로, 기존 에러 핸들러의 분기 순서(`products` 분기를 먼저 검사)를 그대로 뒀다면 리뷰 요청의 500도 "상품 목록을 불러오지 못했습니다."를 물려받았을 것이다. PRD 30.18이 이 지점을 정확히 지목했다. `isReviewRequestPath(path)` 헬퍼를 만들어 **`/api/products` 분기 "보다 먼저"** 검사하도록 분기 순서 자체를 바꿔서 막았다 — 새 핸들러를 만들지 않고 기존 5개 분기 앞에 끼워 넣은 것이다. 단위 테스트로 `/api/products/p1/reviews`·`/api/reviews/abc` → true, `/api/products`·`/api/products/p1` → false를 직접 확인했다(§5-7).
+  - 🐛 **BUG-2026-08-08-01 (M4, 쿠키 최초 발급 경쟁 조건) — 재발 조건이 성립하지 않음을 코드 구조로 확인.** PRD 30.15가 "리뷰 경로 하나가 상품 경로 접두어를 공유하므로, 상품/장바구니 쪽에 `ensureCartId()`를 부르는 공용 전처리가 있다면 리뷰 요청이 그것을 함께 타게 된다"고 경고했다. 이 서버는 **경로 단위 미들웨어를 쓰지 않고 각 라우트 핸들러 안에서 직접 `ensureCartId()`를 호출하는 구조**라서, 애초에 "리뷰 라우트가 상품 라우트의 전처리를 함께 타는" 경로 자체가 없다. 실제로 리뷰 4개 핸들러(`server.js`의 `GET`/`POST /api/products/:productId/reviews`, `PATCH`/`DELETE /api/reviews/:reviewId`)를 코드로 확인한 결과 `ensureCartId`·`cartId`라는 식별자가 전혀 등장하지 않는다. 상품 상세 화면이 로드 시 4개 요청(상품/장바구니/인증/리뷰)을 병렬로 쏘아도 `cartId`를 발급하는 코드 경로가 끝까지 하나(장바구니/결제/주문 핸들러 내부)뿐이므로 경쟁이 성립할 수 없다.
+  - 🐛 **BUG-2026-08-NOTES (M1/M2/M3) — frontend-agent 공유용으로만 언급.** M1(백엔드가 상황별 메시지를 보내면 프론트도 노출해야 한다)은 이번에 리뷰 쪽에서 400(3종)·401·403·404(2종)·409 총 6개 상태가 새로 생겼다는 점에서 그대로 유효하다 — `review-error`가 `error.message`를 하드코딩 없이 그대로 표시해야 한다. M2(DOM 존재 vs 가시성)는 PRD 31.11의 표가 "hidden 토글 vs 개수로 세는 요소"를 이미 명시적으로 구분해뒀으므로 프론트 구현 몫이다. M3은 이번 범위와 무관.
+- **리뷰 저장소는 `server.js` 안의 `Map<reviewId, Review>` 단일 Map**이다(PRD D44). `Map<productId, Review[]>`로 두지 않은 이유는 PRD 데이터 모델 주석에 적힌 그대로다 — 수정·삭제가 `reviewId` 하나만 들고 들어오므로, 상품별 배열 구조면 모든 상품의 배열을 순회해야 하고 그 순회 자체가 "남의 리뷰를 잘못 집는" 버그 자리가 된다. 상품별 목록은 `[...reviews.values()].filter().sort()`로 그때그때 만든다.
+- **응답 변환은 `toReviewSnapshot(productId, viewerEmail)` 한 곳에서만** 한다(PRD 30.19). 필터 → 정렬(createdAt 내림차순) → `isMine` 계산 → `averageRating`/`reviewCount` 계산을 전부 이 함수가 담당하고, **GET/POST/PATCH/DELETE 4개가 전부 이 함수만 호출**한다. `isMine`은 **저장하지 않고** 이 함수 호출 시점에 `viewerEmail`과 비교해서 계산한다 — `viewerEmail`이 `null`(비로그인/무효 세션)이면 전부 `false`.
+- **세션 조회는 5차의 `resolveSession()`을 그대로 재사용했다** — 리뷰용으로 별도 쿠키 파싱·세션 Map 조회 함수를 새로 만들지 않았다. 새 함수를 또 만들면 "세션 유효성 판정 로직이 두 곳"이 되어 그 자체가 버그 자리가 되기 때문이다.
+- **검증 순서를 코드 구조로 고정했다** (PRD 30.8 / 30.10 — 이번 사이클의 핵심 조항). `POST`는 `세션(401) → 상품 존재(404) → 입력(400) → 중복(409)`, `PATCH`/`DELETE`는 `세션(401) → reviewId 존재(404) → 소유권(403) → (PATCH만) 입력(400)` 순서로, 각 핸들러 안에서 **먼저 걸리면 즉시 `return`** 하는 순차 `if`문으로 짰다 — 순서를 바꾸면 안 되는 이유(401이 404보다 먼저여야 "비로그인에 거짓 정보를 주지 않는다", 404가 403보다 먼저여야 "없는 걸 네 것 아니라고 하지 않는다", 403이 400보다 먼저여야 "권한 경계가 입력값과 무관하다")가 코드 주석에도 그대로 적혀 있다.
+- 🔑 **404와 403을 분명히 구별했다** (PRD D46 — 이번 사이클이 요구하는 가장 중요한 설계 결정). `reviews.get(reviewId)`가 `undefined`면 404, 있지만 `review.email !== session.email`이면 403 — 두 분기가 서로 다른 상태 코드·메시지를 낸다. `GET /api/orders/:orderId`(주문 조회, 남의 주문도 404)와 **일부러 다르게** 짠 것이며, 기존 주문 조회 핸들러 코드는 전혀 건드리지 않았다(PRD H12 — 주문 조회는 여전히 404만 쓴다, 실측 §5-7 ⑫에서 기존 동작 회귀 없음 확인).
+- `content` 검증은 "검사"(`validateReviewInput`)와 "저장용 trim"(`body.content.trim()`)을 분리했다 — 검증 함수 내부에서 `trim()` 결과로 길이만 검사하고, 실제로 `Review.content`에 들어가는 값은 핸들러에서 한 번 더 `trim()`한다. 이렇게 분리한 이유는 "trim 후 길이"라는 조건(30.7)을 검증 함수 하나에서 정확히 표현하면서도, 검증 함수가 trim된 문자열을 반환값으로 들고 다니지 않게 하기 위함이다(함수 책임을 "통과/거절 메시지"로만 한정).
+- `GET`/`POST /api/products/:productId/reviews`, `PATCH`/`DELETE /api/reviews/:reviewId` 모두 **`/api` catch-all 404 핸들러보다 위**에 등록했다(2차 메모의 규칙을 그대로 따름). `PATCH`/`DELETE /api/reviews/:reviewId`는 `productId`를 경로에 포함하지 않으므로 기존 `/api/products/:id` 라우트와 패턴이 겹치지 않는다(세그먼트 개수가 다르다) — 등록 순서와 무관하게 안전하다.
+- curl 실측 전체 기록은 §5-7 참고.
+
 ---
 
 ## 변경 이력
@@ -1629,3 +1928,4 @@ password="    "(공백 4자), passwordConfirm="    " (동일) → 201  ✅
 | 2026-08-10 | **4차 사이클 추가 (모의 결제)** — ① **`POST /api/checkout`(§2J)** 신규 — 200(`{order}`, 9개 필드) / 402(승인 거절) / 400(입력 검증 3종) / 409(빈 장바구니), 검증 순서 400→409→402, 성공 시 같은 요청 안에서 주문 저장 + 장바구니 비우기(참조 비공유). ② **`GET /api/orders/:orderId`(§2K)** 신규 — 200(checkout 성공 응답과 동일 shape) / 404(없는 주문·남의 주문·쿠키 없음 3종을 동일하게 처리, 403 아님). ③ §1 목록을 **9개**로 갱신, 이전 "6개/7개가 전부다" 폐기 문구를 이중 취소선으로 남기고 4차 개정 배너로 대체. ④ **4차 검증 기록(§5-4)** — 입력 검증 12케이스, 402 시 장바구니 불변, 200 시 부수효과(저장+비우기)와 items 참조 비공유, 중복 결제 시 409, 주문 조회 소유자 판정 3경로(없음/남의 것/쿠키없음), 경계값, 기존 7개 회귀, M5 반영 코드 리뷰. ⑤ **공용 500 핸들러에 `/api/checkout`·`/api/orders` 분기 추가** (`docs/bug-history/2026-08-08_generic-error-message-leak.md` BUG-2026-08-08-02, M5 — PRD 18.12가 결제 API를 이름으로 지목해 예고한 재발 지점). ⑥ §6에 **4차 구현 메모** 추가 — 확인한 bug-history 3개 문서와 반영/판단 근거 명시 | PRD 15~19장 / 18.1~18.16 구현 완료. **기존 7개 엔드포인트(§2~§2I)의 경로·메서드·상태 코드·에러 문구·래핑은 하나도 바뀌지 않았다** — 회귀 검증을 §5-4 (8)에 기록. `Order`의 `cartId`는 서버 내부 전용이며 응답에 절대 포함하지 않음(`toOrderResponse()`)을 §2J에서 실측 확인(§5-4 (4)) |
 | 2026-10-06 | **5차 사이클 추가 (회원가입/로그인/로그아웃)** — ① **`POST /api/auth/signup`(§2L)** 신규 — 201(`{user}`, email+createdAt 2개 키, Set-Cookie 없음) / 400(이메일 형식·길이, 비밀번호 길이) / 409(중복 이메일, 비밀번호 해시 미계산·기존 계정 불변). ② **`POST /api/auth/login`(§2M)** 신규 — 200(`{user}` + `Set-Cookie: sessionId`) / 400(형식 검증, 401보다 먼저) / 401(이메일 없음·비밀번호 불일치 — 두 경우 완전히 동일한 메시지, D34). ③ **`POST /api/auth/logout`(§2N)** 신규 — 200(`{user:null}` + 쿠키 폐기) / 401(세션 없음·위조·만료 세 경우 동일, 멱등하지 않음 — 200→401). ④ **`GET /api/auth/me`(§2O)** 신규 — 항상 200, 로그인 `{user}` / 비로그인 `{user:null}`, 쿠키 유무에 따라 `Set-Cookie` 폐기 헤더 싣는 조건이 다름(쿠키 아예 없으면 생략). ⑤ §1 목록을 **13개**로 갱신, 이전 "6/7/9개가 전부다" 폐기 문구에 5차 개정 배너 추가. ⑥ 문서 최상단에 **5차 핵심 규칙 배너**(`cartId`/`sessionId` 완전 독립) 추가. ⑦ **5차 검증 기록(§5-5)** — 가입/중복/경계값, 비밀번호 비trim, 중복 가입 후 비밀번호 불변(A5), 로그인 대소문자·공백 규칙, 401 구별불가 확인(B2~B4), 로그아웃 비멱등·세 가지 401 조건, me의 Set-Cookie 조건부 분기, **`cartId`/`sessionId` 완전 독립 실측 + 코드 grep(가장 중요)**, 기존 9개 회귀, M5 반영 코드 리뷰. ⑧ §6에 **5차 구현 메모** 추가 — M4를 이번 사이클의 최우선 과제로 직접 반영한 근거, `hashPassword`/`verifyPassword`/`findSession`/`resolveSession`/`toUserResponse` 단일 책임 설계 근거 명시 | PRD 20~26장 / 24.1~24.19 구현 완료. **기존 9개 엔드포인트(§2~§2K)의 경로·메서드·상태 코드·에러 문구·래핑은 하나도 바뀌지 않았다** — 회귀 검증을 §5-5 (6)에 기록. `package.json`에 새 의존성 없음(§5-5 (6)) — `crypto.scrypt` 등 Node 내장만 사용. `docs/bug-history/2026-08-08_cart-session-race-condition.md`(M4)가 "로그인 기능 추가 시 재발"을 명시적으로 예고한 바로 그 지점이며, `ensureCartId()`/`resolveSession()`을 서로의 코드 경로에 절대 등장시키지 않는 구조로 차단했다(§5-5 (5)에서 실측+grep 모두 확인) |
 | 2026-10-06 (핫픽스) | **5차 사이클 내 사용자 피드백 반영 (D39 — `passwordConfirm` 추가)** — `POST /api/auth/signup`(§2L) 요청 body가 **2필드 → 3필드**(`passwordConfirm` 추가)로 바뀌고, 검증 순서가 `email → password 길이 → passwordConfirm 일치(신규, 400) → 중복(409)`으로 확정됐다. 새 400 메시지 `비밀번호가 일치하지 않습니다.`(사유별로 나누지 않음 — 누락/`null`/타입·대소문자·공백 전부 동일 메시지) 추가. **이미 가입된 이메일 + 불일치 비밀번호는 409가 아니라 400**이 나가도록 순서를 고정했고, 불일치 400일 때 해시 계산·계정 생성·기존 계정 변경이 전혀 일어나지 않음을 실측 확인(§5-6). `POST /api/auth/login`은 **코드 변경 없음** — 여전히 2필드만 읽고 `passwordConfirm`을 받아도 무시한다(§2M에 이 사실을 명시 보강). `server.js`의 변경은 상수 1개(`PASSWORD_MISMATCH_ERROR`) + signup 핸들러 안 400 분기 1개뿐 — `validateAuthCredentialsFormat()`·`toUserResponse()`·세션 관련 함수·login 핸들러는 무변경. `docs/bug-history/` 재확인 결과 **관련 히스토리 없음**(M4/M5 모두 이번 변경의 재발 조건과 무관 — §6 "5차 핫픽스 구현 메모"에 판단 근거 기록) | PRD 2026-10-06 2차 수정(21.1/21.2/21.4/21.6/24.1/24.3/24.4) 구현 완료. curl로 일치/불일치/누락/null/숫자/대소문자/공백/검증순서/서버상태불변/로그인회귀 **10개 케이스** 실행 확인(§5-6). 기존 §2L~§2O의 다른 응답(201 성공 shape, 409, 로그인/로그아웃/me)은 **하나도 바뀌지 않았다** |
+| 2026-10-11 | **6차 사이클 추가 (상품 리뷰/평점)** — ① **`GET /api/products/:productId/reviews`(§2P)** 신규 — 항상 200(비로그인도 포함), `{reviews, averageRating, reviewCount}` 스냅샷, 리뷰 0개여도 200(`averageRating:null`/`reviewCount:0`), 없는 productId는 404("상품을 찾을 수 없습니다." 재사용). ② **`POST /api/products/:productId/reviews`(§2Q)** 신규 — 201(갱신된 전체 스냅샷, 새 리뷰가 맨 앞·`isMine:true`, Set-Cookie 없음) / 검증 순서 401→404→400→409 / 400 메시지 3종(평점 범위, 본문 누락, 본문 길이) / 409(중복, 기존 리뷰 불변). ③ **`PATCH`/`DELETE /api/reviews/:reviewId`(§2R)** 신규 — 검증 순서 401→404→403→(PATCH만)400, 🔑 **존재하지 않는 리뷰(404)와 남의 리뷰(403)를 분명히 구별**(주문 조회의 "둘 다 404"와 일부러 다름, D46). `PATCH` 성공 시 `createdAt` 불변(목록 순서 불변), `DELETE` 성공 시 200+스냅샷(204 아님, 멱등하지 않음 — 200→404). ④ §1 목록을 **17개**로 갱신, 이전 "13개가 전부다" 폐기 문구에 6차 개정 배너 추가. ⑤ 문서 최상단에 **6차 핵심 규칙 배너** 추가(조회/쓰기 인증 분리, 403/404 구별, isMine 서버 계산, Product 응답 불변). ⑥ **6차 검증 기록(§5-7)** — 빈 리뷰 조회, 비로그인 작성 401, 정상 작성·조회 반영, 중복 409 + 불변 확인, 평점/본문 경계값, **403/404 직접 대조(G8, 가장 중요)**, 본인 수정/삭제 성공 + 순서·평균 재계산, Product 응답 5필드 불변, 위조 세션 처리(E6), 리뷰 응답 `cartId` 미발급(H5), 기존 13개 회귀. ⑦ §6에 **6차 구현 메모** 추가 — M5(세 번째 재발, 경로 접두어 공유 형태)를 `isReviewRequestPath()`로 직접 반영한 근거, M4가 경로 단위 미들웨어 부재로 애초에 성립하지 않음을 코드로 확인한 근거, `toReviewSnapshot()` 단일 응답 변환 지점 설계 근거 명시 | PRD 27~32장 / 30.1~30.19 구현 완료. **기존 13개 엔드포인트(§2~§2O)의 경로·메서드·상태 코드·에러 문구·래핑은 하나도 바뀌지 않았다** — 회귀 검증을 §5-7 ⑫에 기록. `GET /api/products`·`GET /api/products/:id` 응답은 여전히 정확히 5개 필드(평점 필드 없음)임을 리뷰 작성 **후**에도 실측 확인(§5-7 ⑨). `docs/bug-history/2026-08-08_generic-error-message-leak.md`(M5)가 지목한 "경로 접두어 공유" 재발 지점을 분기 순서 변경으로 차단했고, 단위 테스트로 재확인(§5-7) |

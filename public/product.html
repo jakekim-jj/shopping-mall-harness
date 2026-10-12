@@ -94,6 +94,76 @@
            role="alert" hidden></p>
       </div>
     </article>
+
+    <!-- 리뷰 영역 (6차 신규, PRD 27장). 상세 화면이 "정상" 상태일 때만 보인다 (27.2) — 토글은
+         product.js의 showOnly()가 함께 담당한다. DOM 순서는 ① 요약 → ② 작성 영역(폼/비로그인
+         안내) → ③ 목록(또는 로딩·빈 상태·에러)로 고정한다 (27.11, frontend-agent 재량 아님). -->
+    <section class="reviews" data-testid="review-section" id="review-section" hidden>
+      <h2 class="reviews__title">리뷰</h2>
+
+      <!-- ① 요약. averageRating이 null이어도 요소는 남고 텍스트만 안내문으로 바뀐다 (27.4 / 31.2). -->
+      <div class="review-summary" data-testid="review-summary" id="review-summary" hidden>
+        <p class="review-summary__average" data-testid="review-average" id="review-average"></p>
+        <p class="review-summary__count">
+          리뷰 <span data-testid="review-count" id="review-count">0</span>개
+        </p>
+      </div>
+
+      <!-- ② 작성 영역 — review-form / review-login-notice 중 정확히 하나만 보이거나 둘 다 숨겨진다
+           (28.11). 둘 다 DOM에 항상 존재하고 hidden 토글만 한다 — 이 4상태는 ③의 로딩/목록/빈
+           상태/에러와 독립이라 동시에 보일 수 있다 (27.10). -->
+      <div class="review-write">
+        <form class="review-form" data-testid="review-form" id="review-form" hidden novalidate>
+          <div class="field">
+            <label class="field__label" for="review-rating-select">평점</label>
+            <!-- 빈 값 placeholder가 초기 선택 상태다 — 기본값을 5로 두면 "평점 미선택 400"을
+                 화면에서 재현할 방법이 사라진다 (28.4). required 등 HTML5 검증 속성 금지. -->
+            <select class="field__input" id="review-rating-select" data-testid="review-rating-select">
+              <option value="">평점 선택</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="review-content-input">리뷰 내용</label>
+            <!-- 🚨 maxlength를 절대 붙이지 않는다 (28.7) — 500자 초과 400을 검증할 유일한 경로다. -->
+            <textarea class="field__input review-form__textarea" id="review-content-input"
+                      data-testid="review-content-input" rows="4"></textarea>
+            <p class="field__hint">
+              500자 이하로 작성해 주세요. (안내일 뿐, 전송을 막지 않습니다)
+              <span class="review-form__counter" data-testid="review-content-counter" id="review-content-counter">0/500</span>
+            </p>
+          </div>
+
+          <button class="btn btn--primary" type="submit" data-testid="review-submit" id="review-submit">
+            리뷰 등록
+          </button>
+        </form>
+
+        <div class="review-login-notice" data-testid="review-login-notice" id="review-login-notice" hidden>
+          <p>로그인 후 작성할 수 있습니다.</p>
+          <a data-testid="review-login-link" href="/login.html">로그인 하러 가기</a>
+        </div>
+      </div>
+
+      <!-- ③ 로딩 / 목록 / 빈 상태 / 에러 — 4상태 중 하나만 보인다 (27.10). review-error는
+           조회·작성·수정·삭제 실패를 전부 공유하는 단일 요소다 (31.8). -->
+      <div class="review-loading" data-testid="review-loading" id="review-loading"
+           aria-live="polite" aria-busy="true" hidden>
+        <span class="sr-only">리뷰를 불러오는 중입니다.</span>
+      </div>
+
+      <p class="review-error" data-testid="review-error" id="review-error" role="alert" hidden></p>
+
+      <div class="notice" data-testid="review-empty" id="review-empty" hidden>
+        <p class="notice__title">아직 작성된 리뷰가 없습니다</p>
+      </div>
+
+      <ul class="review-list" data-testid="review-list" id="review-list" hidden></ul>
+    </section>
   </main>
 
   <footer class="footer">

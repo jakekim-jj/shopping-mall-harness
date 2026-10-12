@@ -20,6 +20,14 @@
  *   비로그인 확정                  → auth-guest visible, auth-user hidden
  *   로그인 확정                    → auth-user visible, auth-guest hidden
  *   두 요소는 DOM에서 제거/재생성하지 않고 hidden 토글만 한다.
+ *
+ * 6차 추가 — 구독 창구 (PRD D52 / 28.2):
+ *   리뷰 영역(product.js)이 로그인 상태를 알아야 하지만, 화면당 GET /api/auth/me 호출 수는
+ *   1회를 유지해야 한다(20.2 불변). 그래서 이 파일이 이미 받은 결과를 다른 화면 스크립트가
+ *   "구독"해서 쓸 수 있는 창구(subscribe/getState)를 추가했다 — /api/auth/me를 다시 부르지 않는다.
+ *   상태값은 { status: 'unresolved'|'guest'|'user', email: string|null } 이다.
+ *   subscribe(callback)은 등록 즉시 현재 상태로 1회 호출하고(늦게 구독해도 현재값을 받는다),
+ *   이후 상태가 바뀔 때마다 다시 호출한다. 구독자가 없어도 이 파일의 동작은 전혀 바뀌지 않는다.
  */
 (function () {
   'use strict';
@@ -37,6 +45,34 @@
     };
   }
 
+  /* ---------- 구독 창구 (PRD D52) — /api/auth/me를 다시 부르지 않고 상태를 공유한다 ---------- */
+
+  var currentState = { status: 'unresolved', email: null };
+  var listeners = [];
+
+  function setState(status, email) {
+    currentState = { status: status, email: email || null };
+    listeners.forEach(function (fn) {
+      try { fn(currentState); } catch (e) { console.error('[auth] 구독자 콜백 오류:', e); }
+    });
+  }
+
+  // 등록 즉시 현재 상태로 1회 호출한다 — 늦게 구독해도(비동기 응답이 이미 도착한 뒤에도)
+  // 구독자가 "확정 전" 상태에 영원히 머무르지 않는다.
+  function subscribe(callback) {
+    if (typeof callback !== 'function') return function () {};
+    listeners.push(callback);
+    callback(currentState);
+    return function unsubscribe() {
+      var idx = listeners.indexOf(callback);
+      if (idx !== -1) listeners.splice(idx, 1);
+    };
+  }
+
+  function getState() {
+    return currentState;
+  }
+
   // { error: { message } } 중첩을 벗기는 지점 (이 파일 안에서는 쓰지 않지만 일관된 자리에 둔다)
   function readErrorMessage(body) {
     if (body && typeof body === 'object' && body.error && typeof body.error.message === 'string') {
@@ -51,12 +87,14 @@
     var e = els();
     if (e.guest) e.guest.hidden = true;
     if (e.user) e.user.hidden = true;
+    setState('unresolved', null);
   }
 
   function showGuest() {
     var e = els();
     if (e.guest) e.guest.hidden = false;
     if (e.user) e.user.hidden = true;
+    setState('guest', null);
   }
 
   function showUser(email) {
@@ -64,6 +102,7 @@
     if (e.user) e.user.hidden = false;
     if (e.guest) e.guest.hidden = true;
     if (e.email) e.email.textContent = email; // 마스킹 없이 그대로 전체 표시 (PRD 20.4)
+    setState('user', email);
   }
 
   // { user: {...} } | { user: null } → 헤더 상태. me/logout 응답 shape이 같으므로 같은 함수로 처리한다 (24.10/24.11).
@@ -148,7 +187,9 @@
   window.HaruAuth = {
     init: init,
     loadAuthState: loadAuthState,
-    readErrorMessage: readErrorMessage
+    readErrorMessage: readErrorMessage,
+    subscribe: subscribe,
+    getState: getState
   };
 
   init();

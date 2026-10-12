@@ -7,11 +7,13 @@
  * - Node.js 20+ / Express, 단일 서버 / 단일 포트 3000
  * - public/ 정적 서빙 + 같은 오리진에서 /api/* 제공 (CORS 불필요)
  * - 이번 범위의 API는 GET /api/products + 2차 신규 5개 + 3차 신규 1개 + 4차 신규 2개 + 5차 신규 4개
- *   = 총 13개 (PRD 24.14)
+ *   + 6차 신규 4개 = 총 17개 (PRD 30.14)
  *   3차 신규: DELETE /api/cart (장바구니 전체 비우기, PRD 13.1)
  *   4차 신규: POST /api/checkout (모의 결제, PRD 18.1), GET /api/orders/:orderId (주문 조회, PRD 18.9)
  *   5차 신규: POST /api/auth/signup, POST /api/auth/login, POST /api/auth/logout, GET /api/auth/me (PRD 24장)
- *   실제 PG 연동, 주문 목록 조회, 취소/환불, DB, 소셜 로그인 등은 여전히 만들지 않는다 (PRD 24.14).
+ *   6차 신규: GET/POST /api/products/:productId/reviews, PATCH/DELETE /api/reviews/:reviewId (PRD 30장)
+ *   실제 PG 연동, 주문 목록 조회, 취소/환불, DB, 소셜 로그인, 리뷰-주문 연결 등은 여전히 만들지 않는다
+ *   (PRD 24.14 / 30.14).
  * - 3차 사이클: 줄 수량 10개 이상이면 그 줄에 10% 자동 할인 (PRD 12장).
  *   할인 계산은 buildCartSnapshot() 한 곳에서만 한다 (PRD 3차 스택 보강).
  * - 4차 사이클: 결제 승인/거절은 요청의 paymentMethod 값만으로 결정론적으로 판정한다.
@@ -21,6 +23,13 @@
  *   `ensureCartId()`를 호출하지 않고, 기존 9개 엔드포인트는 `sessionId`를 읽지 않는다 (PRD D27 / 24.13).
  *   이 분리가 docs/bug-history/2026-08-08_cart-session-race-condition.md(M4) 재발을 막는
  *   유일한 근거다 — cartId를 발급하는 코드 경로가 끝까지 하나뿐이어야 한다.
+ * - 6차 사이클: 상품 리뷰/평점. 조회(`GET`)는 비로그인도 200, 쓰기(`POST`/`PATCH`/`DELETE`)만
+ *   401 (PRD D40). 남의 리뷰를 건드리면 **404가 아니라 403**이다 (PRD D46 — 주문 조회가
+ *   둘 다 404인 것과 일부러 다르다). 리뷰 엔드포인트도 `ensureCartId()`를 호출하지 않는다
+ *   (PRD 30.15 — M4 재발 차단 원칙의 연장). 공용 500 에러 핸들러에 리뷰 분기를 추가할 때
+ *   `/api/products/:productId/reviews`가 `/api/products` 접두어를 공유하므로 **분기 순서**가
+ *   중요하다 — docs/bug-history/2026-08-08_generic-error-message-leak.md(M5)의 세 번째 재발
+ *   지점이며, 이번엔 "경로 접두어 공유" 형태로 온다 (PRD 30.18).
  *
  * 응답 shape은 _workspace/02_backend_api-spec.md 에 문서화되어 있다.
  * shape을 바꿔야 하면 문서를 먼저 고치고 frontend-agent에게 알린다.
@@ -1074,6 +1083,295 @@ app.get('/api/auth/me', (req, res, next) => {
   }
 });
 
+// ===========================================================================
+// 6차 사이클 추가분 — 상품 리뷰 / 평점 (PRD 27~32장)
+//
+// 아래 라우트들도 반드시 "/api 미정의 경로 404 핸들러"보다 위에 있어야 한다.
+//
+// 🔒 쿠키 분리 규칙 (PRD 30.15 / D27, M4 재발 차단 원칙의 연장):
+//   - 이 섹션의 4개 핸들러는 ensureCartId()를 호출하지 않고 cartId 쿠키를 건드리지 않는다.
+//   - `/api/products/:productId/reviews`가 상품 경로 접두어를 공유한다고 해서 상품/장바구니
+//     쪽의 공용 전처리(있다면)를 함께 타면 안 된다 — 이 서버는 전처리를 라우트 핸들러
+//     단위로만 두므로(경로 단위 미들웨어 없음) 애초에 그 위험이 없다.
+//   - sessionId 조회는 findSession()/resolveSession()을 그대로 재사용한다(5차와 동일 패턴) —
+//     세션 Map·쿠키 파싱 로직이 두 곳에 따로 생기면 그 자체가 새 버그 자리가 된다.
+//
+// ⚠️ 메서드별 인증 분기 (PRD D40 / 30.13): GET은 세션이 없어도 200, POST/PATCH/DELETE는
+// 401이다. 같은 경로(`/api/products/:productId/reviews`)에 걸리는 GET과 POST가 서로 다른
+// 인증 요구를 가지므로, 경로 단위 미들웨어로 뭉개지 않고 각 app.get/app.post 핸들러 내부에서
+// 개별적으로 검사한다.
+// ===========================================================================
+
+// --- 리뷰 상수 (PRD 30.7 / D44 / D48) ----------------------------------------
+const RATING_MIN = 1;
+const RATING_MAX = 5;
+const CONTENT_MAX_LENGTH = 500; // trim 후 기준
+
+const RATING_ERROR = '평점은 1 이상 5 이하의 정수로 입력해 주세요.';
+const CONTENT_REQUIRED_ERROR = '리뷰 내용을 입력해 주세요.';
+const CONTENT_LENGTH_ERROR = '리뷰 내용은 500자 이하로 입력해 주세요.';
+const REVIEW_DUPLICATE_ERROR = '이미 이 상품에 리뷰를 작성했습니다.';
+const REVIEW_NOT_FOUND_ERROR = '리뷰를 찾을 수 없습니다.';
+const REVIEW_FORBIDDEN_ERROR = '본인이 작성한 리뷰만 수정하거나 삭제할 수 있습니다.';
+// PRD 9.2와 글자 그대로 같은 문구를 재사용한다 (같은 의미의 실패에 새 문구를 만들지 않는다).
+const PRODUCT_NOT_FOUND_ERROR = '상품을 찾을 수 없습니다.';
+
+/**
+ * 리뷰 저장소 — Map<reviewId, Review> 단일 Map (PRD D44).
+ *
+ * `Map<productId, Review[]>`로 두지 않는다 — 수정·삭제가 reviewId 하나만 들고 들어오므로
+ * (30.11), 상품별 배열 구조면 모든 상품의 배열을 훑어야 하고 그 순회가 곧 "남의 리뷰를
+ * 잘못 집는" 버그 자리가 된다.
+ *
+ * PRD D42: 서버 프로세스 메모리에만 보관한다. DB·파일 영속화 없음. 서버를 재시작하면
+ * 리뷰가 전부 사라져도 되며 그것은 버그가 아니다 — D6·D21·D28과 완전히 같은 판단이다.
+ *
+ * Review 레코드는 정확히 6필드다: reviewId, productId, email, rating, content, createdAt.
+ * isMine은 저장 필드가 아니라 응답을 만들 때 계산한다 (D50 / 30.3) — toReviewSnapshot()이
+ * 그 유일한 계산 지점이다.
+ */
+const reviews = new Map();
+
+/** rating이 1~5 정수인지 검사한다 (PRD 30.7). 0도 6도 4.5도 문자열 "5"도 전부 false. */
+function isValidRating(value) {
+  return Number.isInteger(value) && value >= RATING_MIN && value <= RATING_MAX;
+}
+
+/**
+ * POST/PATCH 공용 입력 검증 (PRD 30.7 — rating → content 누락 → content 길이 순서).
+ * 반환: 에러 메시지 문자열(400으로 보낼 것) 또는 통과 시 null.
+ *
+ * ⚠️ content는 여기서 trim하지 않고 "검사만" 한다 — 실제 저장용 trim은 호출자가
+ * body.content.trim()으로 한 번 더 한다. 검사와 저장을 분리해야 "trim 후 길이"라는
+ * 조건을 검증 함수 하나에서 정확히 반영할 수 있다.
+ */
+function validateReviewInput(body) {
+  const { rating, content } = body;
+
+  if (!isValidRating(rating)) {
+    return RATING_ERROR;
+  }
+  if (typeof content !== 'string') {
+    return CONTENT_REQUIRED_ERROR;
+  }
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    return CONTENT_REQUIRED_ERROR;
+  }
+  if (trimmed.length > CONTENT_MAX_LENGTH) {
+    return CONTENT_LENGTH_ERROR;
+  }
+  return null;
+}
+
+/** 같은 (productId, email) 쌍의 리뷰가 이미 있는지 검사한다 (PRD D45 — 중복 판정 키). */
+function hasReviewByEmail(productId, email) {
+  return [...reviews.values()].some((r) => r.productId === productId && r.email === email);
+}
+
+/**
+ * 응답 변환을 담당하는 유일한 지점 (PRD 30.19 / D50 — toUserResponse()와 같은 규칙).
+ * 필터 → 정렬 → isMine 계산 → averageRating·reviewCount 계산을 전부 여기서 한다.
+ * 4개 엔드포인트(GET/POST 목록, PATCH, DELETE)가 전부 이 함수만 사용한다 — 엔드포인트마다
+ * 스냅샷을 직접 조립하면 그중 하나에서 정렬이 빠지거나 평균이 옛값으로 나간다.
+ *
+ * viewerEmail이 null이면(비로그인/무효 세션) 모든 줄의 isMine이 false다 (30.3).
+ *
+ * top-level 키는 정확히 3개(reviews/averageRating/reviewCount)이고 항상 존재한다.
+ * 리뷰가 0개면 { reviews: [], averageRating: null, reviewCount: 0 } — reviewCount는 0,
+ * averageRating은 null이다. 두 필드의 "없을 때" 규칙이 서로 다르고 그게 의도다 (D50 / 32장 E7).
+ */
+function toReviewSnapshot(productId, viewerEmail) {
+  const forProduct = [...reviews.values()]
+    .filter((r) => r.productId === productId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // createdAt 내림차순 = 최신순 (D51)
+
+  const reviewLines = forProduct.map((r) => ({
+    reviewId: r.reviewId,
+    productId: r.productId,
+    email: r.email,
+    rating: r.rating,
+    content: r.content,
+    createdAt: r.createdAt,
+    isMine: viewerEmail !== null && r.email === viewerEmail,
+  }));
+
+  const reviewCount = reviewLines.length;
+  const averageRating =
+    reviewCount === 0
+      ? null
+      : Math.round((reviewLines.reduce((sum, r) => sum + r.rating, 0) / reviewCount) * 10) / 10;
+
+  return { reviews: reviewLines, averageRating, reviewCount };
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/products/:productId/reviews — 리뷰 목록 + 평균 평점 조회 (PRD 30.5)
+//
+// 비로그인도 200이다 (D40). 상품이 존재하면 리뷰가 0개여도 200 + 빈 스냅샷(9.3과 같은 판단,
+// 404가 아니다). :productId가 시드 상품에 없으면 404.
+// 세션을 읽긴 하지만 없거나 무효해도 401이 아니다 — 그 줄들의 isMine만 전부 false가 된다.
+// 정렬·필터·페이지네이션 쿼리 파라미터는 전부 무시한다 (D51).
+// ---------------------------------------------------------------------------
+app.get('/api/products/:productId/reviews', (req, res, next) => {
+  try {
+    const { productId } = req.params;
+    const product = products.find((p) => p.id === productId);
+    if (!product) {
+      sendError(res, 404, PRODUCT_NOT_FOUND_ERROR);
+      return;
+    }
+
+    // resolveSession()은 무효/만료 세션을 만나면 Map 삭제 + 쿠키 폐기까지 하지만 응답
+    // 상태는 여전히 200이다 — 여기서는 그 반환값(null 가능)을 그대로 isMine 판정에 쓴다.
+    const resolved = resolveSession(req, res);
+    const viewerEmail = resolved ? resolved.session.email : null;
+
+    res.status(200).json(toReviewSnapshot(productId, viewerEmail));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/products/:productId/reviews — 리뷰 작성 (PRD 30.6~30.9)
+//
+// body: { "rating": integer, "content": string }  2개 필드만. email/productId/createdAt/
+//       reviewId 등이 실려 와도 전부 무시한다 — 작성자는 세션, 대상 상품은 URL 경로로 정한다.
+// 201: 갱신된 스냅샷(방금 쓴 리뷰가 맨 앞, isMine: true). Set-Cookie 없음 (cartId도
+//      sessionId도 발급하지 않는다 — 30.15).
+//
+// 검증 순서: 세션(401) → 상품 존재(404) → 입력 검증(400) → 중복(409) — 30.8.
+// 409일 때 기존 리뷰를 덮어쓰지 않는다 — rating/content/createdAt 어느 것도 바뀌지 않는다.
+// ---------------------------------------------------------------------------
+app.post('/api/products/:productId/reviews', (req, res, next) => {
+  try {
+    const resolved = resolveSession(req, res);
+    if (!resolved) {
+      sendError(res, 401, LOGIN_REQUIRED_ERROR);
+      return;
+    }
+
+    const { productId } = req.params;
+    const product = products.find((p) => p.id === productId);
+    if (!product) {
+      sendError(res, 404, PRODUCT_NOT_FOUND_ERROR);
+      return;
+    }
+
+    const body = req.body || {};
+    const validationError = validateReviewInput(body);
+    if (validationError) {
+      sendError(res, 400, validationError);
+      return;
+    }
+
+    const viewerEmail = resolved.session.email;
+    if (hasReviewByEmail(productId, viewerEmail)) {
+      // 중복 — 기존 리뷰를 덮어쓰지 않는다. 여기서 리턴하므로 아래 reviews.set()에 닿지 않는다.
+      sendError(res, 409, REVIEW_DUPLICATE_ERROR);
+      return;
+    }
+
+    const review = {
+      reviewId: crypto.randomUUID(),
+      productId,
+      email: viewerEmail,
+      rating: body.rating,
+      content: body.content.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    reviews.set(review.reviewId, review);
+
+    res.status(201).json(toReviewSnapshot(productId, viewerEmail));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /api/reviews/:reviewId — 리뷰 수정, 본인만 (PRD 30.10~30.11)
+// DELETE /api/reviews/:reviewId — 리뷰 삭제, 본인만 (PRD 30.10~30.11)
+//
+// 둘 다 reviewId가 전역에서 유일하므로(D44) 상품 경로를 반복하지 않는다.
+//
+// 검증 순서 (⚠️ 이번 사이클의 핵심 조항 — 30.10):
+//   1. 세션(401) → 2. reviewId 존재(404) → 3. 소유권(403) → 4. (PATCH만) 입력(400)
+// 🔑 존재하지 않는 리뷰 = 404, 존재하지만 남의 리뷰 = 403 — 둘을 섞지 않는다 (D46).
+// 이것은 주문 조회(D23, 남의 주문도 404)와 "일부러" 다르다 — 리뷰는 GET으로 전원에게
+// 공개되어 reviewId가 이미 노출되어 있으므로 숨길 것이 없다.
+//
+// PATCH 성공: createdAt을 바꾸지 않는다. updatedAt을 만들지 않는다 (D49) — 목록 순서가
+// 수정으로 변하지 않는다.
+// DELETE 성공: 204가 아니라 200 + 갱신된 스냅샷(9.6/30.11과 같은 판단). 같은 reviewId로
+// 다시 호출하면 404다 — 멱등하지 않으며 의도된 동작이다 (24.10/18.16과 같은 패턴).
+// ---------------------------------------------------------------------------
+app.patch('/api/reviews/:reviewId', (req, res, next) => {
+  try {
+    const resolved = resolveSession(req, res);
+    if (!resolved) {
+      sendError(res, 401, LOGIN_REQUIRED_ERROR);
+      return;
+    }
+
+    const { reviewId } = req.params;
+    const review = reviews.get(reviewId);
+    if (!review) {
+      sendError(res, 404, REVIEW_NOT_FOUND_ERROR);
+      return;
+    }
+
+    if (review.email !== resolved.session.email) {
+      sendError(res, 403, REVIEW_FORBIDDEN_ERROR);
+      return;
+    }
+
+    const body = req.body || {};
+    const validationError = validateReviewInput(body);
+    if (validationError) {
+      sendError(res, 400, validationError);
+      return;
+    }
+
+    // 교체(덮어쓰기)만 한다 — reviewId/productId/email/createdAt은 하나도 바뀌지 않는다 (D49).
+    review.rating = body.rating;
+    review.content = body.content.trim();
+
+    res.status(200).json(toReviewSnapshot(review.productId, resolved.session.email));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete('/api/reviews/:reviewId', (req, res, next) => {
+  try {
+    const resolved = resolveSession(req, res);
+    if (!resolved) {
+      sendError(res, 401, LOGIN_REQUIRED_ERROR);
+      return;
+    }
+
+    const { reviewId } = req.params;
+    const review = reviews.get(reviewId);
+    if (!review) {
+      sendError(res, 404, REVIEW_NOT_FOUND_ERROR);
+      return;
+    }
+
+    if (review.email !== resolved.session.email) {
+      sendError(res, 403, REVIEW_FORBIDDEN_ERROR);
+      return;
+    }
+
+    // DELETE는 body를 받지 않으므로 4순위(입력 검증)가 없다 — 소유권 확인 후 바로 삭제한다.
+    reviews.delete(reviewId);
+
+    res.status(200).json(toReviewSnapshot(review.productId, resolved.session.email));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // /api/* 미정의 경로 — 이번 범위 밖 엔드포인트는 존재하지 않음을 JSON으로 알린다.
 // ---------------------------------------------------------------------------
@@ -1100,7 +1398,24 @@ app.use('/api', (req, res) => {
 // 5차 추가: PRD 24.17이 같은 패턴을 다시 예고했다 — 분기를 추가하지 않으면 로그인/가입
 // 실패 화면에도 "상품 목록을 불러오지 못했습니다."가 뜬다. 새 핸들러를 만들지 않고
 // 기존 4개 분기에 5번째로 이어 붙인다.
+//
+// 6차 추가: PRD 30.18이 M5의 세 번째 재발 지점을 예고했다 — 이번엔 "경로 접두어 공유"
+// 형태다. 리뷰 경로 중 하나(`/api/products/:productId/reviews`)가 `/api/products` 접두어를
+// 그대로 공유하므로, 아래에서 `startsWith('/api/products')`를 먼저 검사하면 리뷰 요청의
+// 500도 "상품 목록을 불러오지 못했습니다."를 물려받는다. 그래서 🚨 리뷰 분기를 상품 분기
+// "보다 먼저" 검사한다(분기 순서 자체가 요구사항 — 30.18). `/api/reviews/:reviewId`는
+// 접두어가 겹치지 않지만 같은 분기 함수로 묶어 한 곳에서만 판단한다.
 // ---------------------------------------------------------------------------
+
+/**
+ * 요청 경로가 리뷰 엔드포인트(둘 중 하나)에 해당하는지 판정한다 (PRD 30.18).
+ * `/api/products` 분기보다 반드시 먼저 호출해야 한다 — 그래야 접두어 공유로 인한
+ * M5 재발(상품 문구가 리뷰 요청에 새어나가는 것)을 막을 수 있다.
+ */
+function isReviewRequestPath(path) {
+  return path.startsWith('/api/reviews') || /^\/api\/products\/[^/]+\/reviews(?:\/|$)/.test(path);
+}
+
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('[error]', req.method, req.originalUrl, err);
@@ -1111,7 +1426,10 @@ app.use((err, req, res, next) => {
 
   if (req.path.startsWith('/api')) {
     let message = '요청을 처리하지 못했습니다.';
-    if (req.path.startsWith('/api/products')) {
+    if (isReviewRequestPath(req.path)) {
+      // 🚨 반드시 '/api/products' 분기보다 먼저 검사한다 — 30.18 / M5 세 번째 재발 지점.
+      message = '리뷰 요청을 처리하지 못했습니다.';
+    } else if (req.path.startsWith('/api/products')) {
       // 1차부터 문서화된 문구다. PRD 데이터 모델의 "서버 오류 → 500" 예시와 일치시킨다.
       message = '상품 목록을 불러오지 못했습니다.';
     } else if (req.path.startsWith('/api/cart')) {

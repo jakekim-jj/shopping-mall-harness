@@ -845,6 +845,107 @@ API 스펙 §2L~§2O(`POST /api/auth/signup`·`/login`·`/logout`, `GET /api/aut
 
 PRD 20~26장이 선택자 이름·메시지 문구·상태 전환 규칙까지 전부 표로 확정해 뒀다(26장 경계 조건 매트릭스가 사실상 구현 체크리스트 역할을 했다). frontend-agent가 재량으로 결정한 것은 **인증 영역을 `masthead__aside` 안에서 어느 순서로 배치할지**(cart-link보다 앞쪽에 둠 — PRD는 순서를 지정하지 않았다) 정도이며, 선택자·동작에 영향을 주지 않는 시각적 배치라 별도 문의 없이 진행했다.
 
+# 6차 사이클 — 상품 리뷰 / 평점 (2026-10-11)
+
+## 42. 이번 사이클에 만든 것
+
+**신규 화면은 0개다** (PRD 27.1). 리뷰는 상품 상세 화면(`/product.html?id=...`) 안에 **새로 추가된 한 영역**이며, 기존 상세 본문(이미지/이름/가격/설명/수량/담기)과 기존 7개 화면의 나머지 부분은 **한 줄도 바뀌지 않았다**. 변경/추가한 파일은 아래 3개뿐이다.
+
+- `public/product.html` — `product-detail` `</article>` 바로 뒤에 `review-section` 영역 추가 (요약 → 작성 영역 → 로딩/목록/빈상태/에러 순, PRD 27.11)
+- `public/product.js` — 상단 주석에 6차 계약 추가, `showOnly()`에 `rv.section.hidden = name !== 'detail'` 한 줄 추가, `loadProduct()`에 `loadReviews(id)` 병렬 호출 한 줄 추가, 그 아래에 리뷰 전용 함수 묶음(조회/작성/수정/삭제/렌더링) 추가
+- `public/auth-header.js` — 기존 3상태 전환 함수(`showUnresolved`/`showGuest`/`showUser`) 끝에 `setState()` 호출 한 줄씩 추가 + `subscribe()`/`getState()` 공개 (D52 구독 창구). **`GET /api/auth/me` 호출 횟수·호출 지점은 전혀 안 바뀜** — 이 파일이 호출하는 유일한 지점은 그대로다
+- `public/styles.css` — 파일 끝에 `.reviews`/`.review-*` 블록 추가 (기존 `.field`/`.btn`/`.notice` 재사용, 새 색상 토큰 없음)
+
+## 43. 화면명 — 호출 API — 기대 응답 shape (6차 신규)
+
+```
+상품 상세(리뷰 영역)  —  GET /api/products/{id}/reviews  —  200 { reviews:[...], averageRating: number|null, reviewCount: number }
+  (화면당 1회, GET /api/products/:id·GET /api/cart·GET /api/auth/me와 병렬 호출, 404(상품 없음)면 영역 숨김)
+
+상품 상세(작성)      —  POST /api/products/{id}/reviews  —  201 { reviews, averageRating, reviewCount }  (전체 스냅샷)
+                         400(평점 범위/본문 누락/본문 길이) · 401(비로그인) · 404(없는 상품) · 409(중복)
+
+상품 상세(수정)      —  PATCH /api/reviews/{reviewId}     —  200 { reviews, averageRating, reviewCount }  (전체 스냅샷)
+                         400(검증, POST와 동일 3종) · 401 · 403(남의 리뷰) · 404(없는 reviewId)
+
+상품 상세(삭제)      —  DELETE /api/reviews/{reviewId}    —  200 { reviews, averageRating, reviewCount }  (전체 스냅샷)
+                         401 · 403 · 404
+```
+
+- **4개 엔드포인트가 전부 같은 스냅샷 shape을 돌려준다** — `renderReviewSummary()` + `renderReviewList()`를 호출하는 `applyReviewSnapshot()` 하나로 네 응답을 전부 처리한다. 쓰기(작성/수정/삭제) 성공 후 `GET`을 다시 호출하는 코드는 없다.
+- `reviews[i]`의 7개 필드(`reviewId`/`productId`/`email`/`rating`/`content`/`createdAt`/`isMine`)를 전부 그대로 옮긴다. `isMine`은 서버가 준 boolean을 그대로 쓴다 — 프론트가 이메일을 비교하는 코드는 이 파일에 없다.
+- `averageRating`은 `null`과 `number`를 falsy 검사(`if (averageRating)`)가 아니라 `=== null`로만 구분한다. `reviewCount`는 `reviews.length`가 아니라 응답 필드를 그대로 쓴다.
+
+## 44. API shape ↔ 화면 모델 매핑 지점 (6차)
+
+`public/product.js`의 리뷰 전용 구역에 3개 함수가 유일한 매핑 지점이다.
+
+| 함수 | 역할 |
+|---|---|
+| `mapReviewItem(raw)` | 리뷰 줄 1개 → 화면 모델 (타입 강제 변환만, 산술 없음) |
+| `mapReviewSnapshot(body)` | top-level 3키(`reviews`/`averageRating`/`reviewCount`) 계약을 검증하고 옮기는 **유일한** 지점. `Array.isArray(body.reviews)`가 아니면 계약 위반으로 보고 에러로 던진다 |
+| `parseReviewResponse(res)` | 4개 엔드포인트 공용 — 상태 코드로 성공/실패 판정(`res.ok`), 실패 시 `HaruCart.readErrorMessage()`로 `{error:{message}}`를 벗겨 `Error`에 싣는다(`err.status`도 함께) |
+
+## 45. 로그인 상태 구독 — `GET /api/auth/me`를 다시 부르지 않는 방법 (D52)
+
+- `auth-header.js`에 `window.HaruAuth.subscribe(callback)`을 추가했다. 호출 즉시 현재 상태로 1회 실행되고(늦게 구독해도 "확정 전"에 영원히 머물지 않음), 이후 상태가 바뀔 때마다(`showUnresolved`/`showGuest`/`showUser` 호출 시점) 다시 실행된다.
+- `product.js`는 `window.HaruAuth.subscribe(fn)` 한 번만 호출한다. `fetch('/api/auth/me')`를 호출하는 코드는 리뷰 영역에 **없다** — 화면당 호출 수는 그대로 1회다.
+- 로그인 상태(`authStatus`: `'unresolved'|'guest'|'user'`)와 "내 리뷰 보유 여부"(`hasMyReview()` — 마지막 스냅샷의 `isMine` 중 하나라도 true인지)를 조합해 작성 영역을 그린다. 두 입력이 서로 다른 시점에 도착해도(먼저 로그인 상태가 오거나, 먼저 리뷰 목록이 오거나) 각자 도착할 때마다 `updateWriteAreaVisibility()`를 다시 불러 최종 상태로 수렴한다.
+
+## 46. 리뷰 영역 내부 상태 — "조회 상태 3자"와 "에러"를 분리한 이유
+
+PRD 27.10은 로딩/목록/빈상태/에러를 "4상태, 서로 배타적"이라고 적었지만, 28.9/29.9(작성·수정·삭제 실패 시 "목록·평균·개수가 실패 전 값 그대로 유지")와 29.9(G20, "그 줄이 화면에서 사라지지 않고")를 동시에 만족하려면 **쓰기 실패 시 목록이 보이는 채로 에러도 함께 보여야** 한다. 그래서 구현은 두 축으로 나눴다.
+
+- `setReviewDataState(name)` — `'loading'|'list'|'empty'|'none'` 중 하나로 **조회 결과**만 토글한다 (summary는 `'list'`/`'empty'`일 때만 함께 보임).
+- `showReviewError(msg)` / `clearReviewError()` — `review-error` 하나를 독립적으로 토글한다. 조회 자체가 실패했을 때만 `setReviewDataState('none')`과 함께 호출해 "데이터 없음 + 에러"를 만들고, 작성/수정/삭제 실패 시에는 **데이터 상태를 건드리지 않고** 에러만 띄운다.
+
+실브라우저로 작성 실패(409)·수정/삭제 실패(404, 가짜 reviewId로 재현)를 각각 확인했고, 두 경우 모두 목록·평균·개수가 그대로였고 review-error만 추가로 보였다(아래 48절).
+
+## 47. data-testid (PRD 31.1~31.12)
+
+PRD가 선택자 이름을 전부 확정해 뒀으므로 그대로 구현했다. 표 31.11의 "hidden 토글 vs 개수로 세는 요소" 구분을 그대로 따랐다 — `review-item-edit`/`review-item-delete`는 `isMine`인 줄에만 **DOM에 만들고**(hidden 토글 아님), `review-form`/`review-login-notice`는 항상 DOM에 있고 `hidden`만 토글한다. 추가로 만든 선택자는 없다 — 31장 표에 없는 글자 수 카운터용 선택자 같은 것은 만들지 않았다(28.7 지시 그대로).
+
+## 48. 검증 기록 (6차) — 실브라우저(Chrome) 확인
+
+`node server.js`로 서버를 띄우고 Chrome 자동화로 직접 확인했다.
+
+1. **비로그인 + 리뷰 1개 상품** — 목록·평균(`4점`)·개수(`리뷰 1개`)는 보이고, `review-form` hidden / `review-login-notice` visible(텍스트 정확히 "로그인 후 작성할 수 있습니다.", 링크 `href="/login.html"` 정확히 — 쿼리스트링 없음). 그 리뷰 줄에 `review-item-edit`/`review-item-delete`가 **0개**(`toHaveCount(0)`에 해당하는 상태) 확인
+2. **회원가입 → 로그인 → 상품 상세** — `review-form`이 visible로 전환, 평점 선택 + 본문 입력 + 제출 → **201**, 응답 스냅샷으로 즉시 반영(평균 `5점`→`4점`으로 두 번째 계정 작성 후 자동 재계산도 별도로 확인), 폼이 숨겨지고 내 줄에 수정/삭제 버튼 정확히 1개씩 생성됨, `GET` 재호출 없음(네트워크 로그로 확인)
+3. **같은 상품에 두 번째 작성 시도** — **409** `이미 이 상품에 리뷰를 작성했습니다.`가 `review-error`에 그대로 표시, 입력값(평점 `2`/본문) 유지, 기존 리뷰·평균·개수는 그대로(F6/F17 확인)
+4. **본인 리뷰 수정** — 수정 버튼 클릭 → 그 줄이 인라인 폼으로 전환(표시 요소는 `hidden`), 옵션 5개(빈값 없음)·현재 값으로 채워짐 확인 → 저장 → **200**, `rating`/`content`만 바뀌고 `createdAt`(목록 위치) 불변, 평균이 그 응답에서 즉시 재계산됨(G4/G5)
+5. **본인 리뷰 삭제** — 클릭 즉시(확인 다이얼로그 없음) **200**, 그 줄이 목록에서 사라지고 평균이 `null` 안내로, 작성 폼이 다시 visible로 전환(입력값 빈 상태) — G16/G17/29.7 확인
+6. **리뷰 0개 상품(p3)** — `review-average` 텍스트가 "아직 평점이 없습니다"(숫자/0/−/빈 문자열 아님), `review-count`는 `0`, `review-empty` 노출, 그 상태에서도 로그인 사용자의 작성 폼은 그대로 보임(27.8/28.11 동시 성립 확인)
+7. **404(없는 reviewId)로 직접 DELETE** — 실제 `handleReviewDelete()` 코드 경로를 그대로 태운 재현(버튼을 복제해 `data-review-id`만 존재하지 않는 UUID로 바꿔 클릭)으로 **404** `리뷰를 찾을 수 없습니다.`가 `review-error`에 뜨고, 실제 내 리뷰 줄은 전혀 변경되지 않음을 확인(G20과 동일한 경로)
+8. **기존 Playwright 204개 전수 재실행** — 전부 통과(회귀 없음), 두 번(수정 전/버그 수정 후) 모두 확인
+
+### 🐛 실제로 찾아 고친 버그 (구현 중 자가 발견)
+
+수정/삭제 **성공** 직후, `rowBusy[reviewId]`를 지우는 시점이 `applyReviewSnapshot()`(재렌더) **이후**였다. `renderReviewList()`가 매번 완전히 새 DOM을 만드는데, 그 생성 시점에 아직 `rowBusy[reviewId]`가 `true`로 남아 있어서 **새로 만들어진 버튼이 처음부터 `disabled`로 굳어버리고**, 뒤늦게 재활성화하는 코드는 이미 DOM에서 떨어져나간 옛 버튼을 가리켜 아무 효과가 없었다. 실브라우저로 "수정 성공 → 곧바로 삭제 클릭"을 재현하다가 삭제가 전혀 반응하지 않는 것을 발견했다. 고친 방법: `rowBusy[reviewId]` 삭제를 **재렌더 호출 바로 앞**으로 옮겼다(성공 케이스에서만 — 실패 케이스는 재렌더를 안 하므로 기존 그대로 버튼 자체를 재활성화). 고친 뒤 같은 시나리오(작성→수정→삭제 연속)를 다시 돌려 정상 동작 확인(위 4·5번이 수정된 코드 기준 결과다).
+
+> 리뷰 조회 실패(네트워크 가로채기)가 상세 본문 렌더를 막지 않는지는, `loadReviews()`와 상품 조회가 **서로 독립된 `fetch()` 프로미스 체인**이고 `loadReviews()`의 `catch`가 `rv.*` 요소만 건드린다는 점을 코드로 확인했다 — 이번 세션의 브라우저 자동화 도구에는 탐색 간 지속되는 네트워크 차단/가로채기 기능이 없어 실시간 재현은 못 했다. 기존 Playwright 204개(그중 `product-detail.spec.js`의 로딩/에러 상태 포함)가 **매 테스트마다 실제로 병렬 리뷰 조회를 수행하면서도** 전부 통과했다는 점이 간접 증거다. qa-agent가 자동화 코드를 작성할 때 `page.route()`로 `**/reviews` 요청만 선택적으로 실패시켜 직접 재현해 주길 권한다(E12/H11).
+
+## 49. `docs/bug-history/` 확인 결과 (작업 전 RAG)
+
+- **M2(DOM 존재 vs 가시성 구분, `2026-08-05_and_08_minor-notes.md`)** — 이번 사이클에 직접 해당한다. PRD 31.11이 "hidden 토글"과 "개수로 세는 요소"를 선택자별로 명시적으로 나눠 둔 그대로 구현했다: `review-form`/`review-login-notice`/`review-loading`/`review-list`/`review-empty`/`review-error`/`review-summary`는 `hidden` 토글(항상 DOM에 존재), `review-item`/`review-item-edit`/`review-item-delete`는 매번 다시 그려지는 "개수로 세는" 요소(`isMine`이 아닌 줄에는 버튼을 아예 만들지 않음 — `hidden` 속성을 붙이는 방식을 쓰지 않았다).
+- **M1(서버가 상황별 메시지를 보내면 프론트도 노출, `2026-08-05_and_08_minor-notes.md`)** — 6차에 신규 400 3종·403·404(신규)·409가 생겼고, 전부 `review-error`에 `error.message`를 **하드코딩 없이 그대로** 표시한다(28.9/29.9). 문구를 프론트에서 만든 곳은 없다.
+- **M4(쿠키 최초 발급 경쟁 조건)** — 리뷰 API는 backend-agent가 `ensureCartId()`를 전혀 호출하지 않는다고 명시했다(API 스펙 §2P~§2R 서문). 프론트 쪽에서도 `reviewsCollectionUrl()`/`reviewItemUrl()`이 만드는 요청에 `credentials`를 건드리는 코드가 없고(기존 패턴과 동일하게 same-origin 기본 동작), `document.cookie`를 읽거나 쓰는 코드가 리뷰 구역에 없다 — 상품 상세 화면이 이제 `GET /api/products/:id`·`GET /api/cart`·`GET /api/auth/me`·`GET /api/products/:id/reviews` 네 요청을 병렬로 쏘는 구조가 됐지만, 실브라우저로 완전 새 세션(쿠키 전부 삭제 상태의 회원가입부터)으로 진행해도 장바구니 담기 → 장바구니 화면 이동에서 담은 상품이 정상적으로 보였다(쪼개짐 없음).
+- **M3** — 이번 범위와 무관 (이미지 에러 리스너 관련, 상세 본문은 전혀 안 건드림).
+
+## 50. backend-agent에게 — 계약 불일치 없음
+
+API 스펙 §2P~§2R에 적힌 shape·상태 코드·검증 순서가 **실제 서버 응답과 전부 일치했다.**
+
+- 4개 엔드포인트 모두 `{reviews, averageRating, reviewCount}` 동일 shape 확인 (`curl`로 조회/작성/수정/삭제 응답의 top-level 키를 직접 대조)
+- `averageRating`이 0개일 때 `null`, `reviewCount`는 `0` — 두 필드의 규칙이 다르다는 것을 실제로 확인(E7과 동일한 케이스)
+- 403과 404가 실제로 다른 상태 코드·메시지로 돌아옴을 확인 (가짜 reviewId → 404, 남의 리뷰를 흉내낸 재현 → 403) — 프론트는 두 경우를 구분하지 않고 같은 `review-error`에 그대로 표시하면 되므로 추가 분기 코드가 필요 없었다
+- `isMine`이 항상 boolean이고 비로그인/위조 세션에서도 전부 `false`로 옴 — 프론트가 이메일을 비교하는 코드를 둘 필요가 없었다
+
+**추측으로 채운 필드 없음. 회신할 불일치 없음.**
+
+## 51. product-planner에게 — 확인 필요한 프론트 재량 사항 1건 (참고용, 결정은 이미 내림)
+
+PRD 29.2가 "수정 인라인 폼이 열리는 방식은 기존 패턴이 있으면 따르고 없으면 frontend-agent가 결정해도 된다"고 재량을 열어뒀다. 이 하네스에 "줄 안에서 펼쳐지는 수정 폼" 선례가 없어서, **그 줄 안에 같은 폭(`max-width: 420px`)의 박스를 추가로 끼워 넣는 방식**으로 결정했다(모달·별도 페이지 아님). 선택자(`review-edit-form`/`review-edit-rating`/`review-edit-content`/`review-edit-save`/`review-edit-cancel`)는 31.10 확정값을 그대로 썼으므로 qa-agent 검증에는 영향이 없다. 재논의가 필요하면 알려달라.
+
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 사유 |
@@ -855,3 +956,4 @@ PRD 20~26장이 선택자 이름·메시지 문구·상태 전환 규칙까지 �
 | 2026-08-10 | **4차 사이클 추가(23~31절)** — 결제 화면(`checkout.html`/`checkout.js`) 신규: 주문 요약(읽기 전용, `GET /api/cart` 1회로 요약+배지 동시 채움) + 주문자 정보 2개 + 모의 결제 라디오 2개 + `POST /api/checkout`. 주문 확인 화면(`order.html`/`order.js`) 신규: `GET /api/orders/:orderId` 조회, 404 통합 처리(없는 주문/남의 주문/쿠키 없음 동일). 장바구니 화면에 `checkout-link` 추가(결제 진입점은 장바구니 화면에만 존재). `cart-badge.js`에 `mapLineItem` 공개 — 주문 확인 화면이 CartItem 매핑을 재사용. `checkout-error` 단일 요소로 400/402/409/5xx/네트워크 5종 실패를 모두 표시(409만 상품 목록 링크 동반). 1~22절(1~3차)은 그대로 두고 아래에 덧붙임 | PRD 15~19장 / API 스펙 §2J·§2K 구현. curl 통합 테스트로 200/402/409/404(남의 주문) 전 경로 확인(29절), `docs/bug-history/` M4(결제 화면 이름으로 지목된 재발 지점)·M5·M2 확인 결과는 28절 |
 | 2026-10-06 | **5차 사이클 추가(32~41절)** — 공용 모듈 `auth-header.js` 신규: 7개 화면이 공유하는 **유일한** 인증 영역 로직, 화면당 `GET /api/auth/me` 정확히 1회(M4 재발 차단의 핵심 — `cartId`/`HaruCart`를 전혀 건드리지 않음), `auth-guest`/`auth-user` 3상태(확정 전/게스트/로그인) 토글, 로그아웃 버튼 핸들러. 회원가입 화면(`signup.html`/`signup.js`) 신규: 이메일·비밀번호 2입력 + 고정 길이 안내 문구 + `POST /api/auth/signup`, 성공해도 화면 이동 없이 폼을 숨기고 로그인 링크만 노출(자동 로그인 아님). 로그인 화면(`login.html`/`login.js`) 신규: `POST /api/auth/login`, 성공 시 `/`로 이동·실패 시 이메일 유지+비밀번호만 초기화(가입 화면과 정반대 규칙). 기존 5개 화면의 헤더에 `auth-area` 마크업과 스크립트 태그 한 줄만 **추가**(본문 로직 무변경). 1~31절(1~4차)은 그대로 두고 아래에 덧붙임 | PRD 20~26장 / API 스펙 §2L~§2O 구현. curl로 D27(cartId/sessionId 완전 독립) 전 과정 직접 재현·확인, Chrome 실브라우저로 가입→로그인→헤더 전환→로그아웃 전체 플로우 확인, 기존 Playwright 84개 전수 재실행해 전부 통과 확인(39절), `docs/bug-history/` M4(이번 사이클을 이름으로 지목한 재발 조건)·M5·M1/M2 확인 결과는 38절 |
 | 2026-10-06 (핫픽스) | **5차 사이클 내 사용자 피드백 반영 (D39 — `passwordConfirm` 추가 / placeholder 추가)** — `signup.html`에 `data-testid="signup-password-confirm"`(`type="password"`) 입력란을 `signup-password-hint`와 `signup-password` 사이가 아니라 **그 뒤**(DOM 순서: email→password→hint→password-confirm)에 추가, 별도 helper text 없음. `signup.js`는 `password`/`passwordConfirm` 두 값을 비교하지 않고 그대로 `POST /api/auth/signup` body 3필드에 실어 보내도록 1줄 추가(`payload.passwordConfirm = el.passwordConfirm.value`) — 비교 분기·실시간 일치 표시·버튼 비활성화는 전혀 추가하지 않았다. 새 400 메시지(`비밀번호가 일치하지 않습니다.`)는 기존 `signup-error` 요소·`readErrorMessage()`/`showError()` 경로를 그대로 재사용(메시지별 분기 코드 추가 없음). 실패 시 이메일·비밀번호·비밀번호 확인 3개 입력값 모두 유지(기존 코드가 애초에 어떤 입력값도 지우지 않으므로 추가 수정 불필요). `signup.html`·`login.html` 양쪽 이메일 입력란에 `placeholder="example@email.com"` 추가(`type`은 `text` 그대로, `required`/`pattern`/`type="email"` 추가 안 함), 비밀번호류 입력란에는 placeholder 미추가. `login.html`/`login.js`는 확인란·placeholder 외 변경 없음(로그인은 여전히 2필드, `passwordConfirm` 미전송). `docs/bug-history/` 재확인 결과 **관련 히스토리 없음**(M1: 서버 메시지 그대로 표시 패턴을 그대로 재사용해 위반 소지 없음. M2: 이번 변경은 hidden 토글 요소를 늘리지 않음 — 새 선택자는 폼이 보이는 동안 항상 visible이라 3상태 토글 대상이 아님. M4/M5: 이번 변경은 `/api/auth/*` 요청 body 필드 추가일 뿐 쿠키·에러 핸들러 경로를 건드리지 않아 무관) | 사용자 요청(D39 재확정 — 21.1/21.2/21.4/21.6/24.1/24.3, placeholder — 21.13/22.12/25.18) 구현 완료. Chrome 실브라우저로 ① `signup-email`/`login-email` placeholder 속성·초기 빈 value 확인 ② 불일치 값 제출 → 네트워크 탭에서 실제 400 요청 확인 + `signup-error`에 정확한 메시지 표시 확인 ③ 일치 값 제출 → 201 + 폼 hidden + 성공 안내 + 헤더 게스트 상태 유지 확인 ④ 방금 가입한 계정으로 `/login.html` 로그인 → `/`로 이동 + 헤더에 전체 이메일 노출 확인 ⑤ `login.html`에 `login-password-confirm`·`signup-password-hint` 부재, 입력란 정확히 2개 확인. signup/login 전용 Playwright spec은 아직 없음(qa-agent 승인 전) — 기존 `tests/e2e/*.spec.js` 5개에는 signup/login 셀렉터 참조가 없어 회귀 영향 없음 |
+| 2026-10-11 | **6차 사이클 추가(42~51절)** — 신규 화면 0개, 상품 상세 화면(`product.html`) 안에 리뷰 영역 추가. `product.js`에 조회(`GET /api/products/:id/reviews`, 상품 조회와 병렬)·작성(`POST`)·수정(`PATCH`)·삭제(`DELETE`) 로직 추가, 4개 응답을 전부 `applyReviewSnapshot()` 하나로 렌더링. `auth-header.js`에 `subscribe()`/`getState()` 구독 창구 추가(D52) — 리뷰 영역이 `GET /api/auth/me`를 따로 호출하지 않고 이미 받은 결과를 구독. 작성 폼/로그인 안내는 `hidden` 토글(28.11 4상태), 리뷰 줄의 수정·삭제 버튼은 `isMine`인 줄에만 DOM 생성(29.11, hidden 아님). 403(남의 리뷰)·404(없는 reviewId) 구별, 409(중복 작성) 전부 `review-error` 하나로 서버 메시지 그대로 표시. `styles.css`에 `.review-*` 블록만 추가(새 색상 토큰 없음, 기존 `.field`/`.btn`/`.notice` 재사용). 1~41절(1~5차)은 그대로 두고 아래에 덧붙임 | PRD 27~32장 / API 스펙 §2P~§2R 구현. Chrome 실브라우저로 비로그인 열람→회원가입→로그인→작성(201)→중복 작성(409, 입력값 유지)→수정(200, 순서 불변)→삭제(200, 폼 재노출)→0개 상품 null 안내 전부 확인(48절). **구현 중 자가 발견한 버그 1건**(수정/삭제 성공 직후 재렌더된 버튼이 `rowBusy` 해제 순서 문제로 영구 disabled되던 것) 즉시 수정·재검증 완료(48절). 기존 Playwright 204개 전수 재실행 2회(버그 수정 전/후) 모두 통과, `docs/bug-history/` M1·M2·M4 확인 결과는 49절 |

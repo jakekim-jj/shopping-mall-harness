@@ -979,3 +979,138 @@ body {
 }
 
 .notice--success .notice__title { color: var(--accent); }
+
+/* =======================================================================
+   6차 사이클 추가 (2026-10-11) — 상품 상세 화면의 리뷰 영역 (/product.html).
+   새 색상 토큰은 추가하지 않는다. 입력 요소는 .field/.field__label/.field__input,
+   버튼은 .btn/.btn--primary, 빈 상태는 .notice를 그대로 재사용한다.
+   ======================================================================= */
+
+.reviews {
+  margin: 48px 0 0;
+  padding: 32px 0 0;
+  border-top: 1px solid var(--rule);
+  max-width: 640px;
+}
+
+.reviews__title {
+  margin: 0 0 20px;
+  font-size: 19px;
+}
+
+.review-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin: 0 0 24px;
+}
+
+.review-summary__average {
+  margin: 0;
+  font-family: var(--font-num);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.review-summary__count {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.review-write { margin: 0 0 28px; }
+
+.review-form { max-width: 420px; }
+
+.review-form__textarea,
+.review-edit-form textarea {
+  resize: vertical;
+  min-height: 92px;
+  font-family: inherit;
+}
+
+.review-form__counter { margin-left: 6px; }
+.review-form__counter--over { color: var(--danger, #d64545); font-weight: 600; }
+
+.review-login-notice {
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+  font-size: 13.5px;
+}
+
+.review-login-notice p { margin: 0 0 8px; }
+.review-login-notice a { color: var(--accent); }
+
+.review-error {
+  margin: 0 0 20px;
+  padding: 15px 18px;
+  border: 1px solid var(--warn);
+  background: var(--card);
+  box-shadow: inset 3px 0 0 var(--warn);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.review-loading {
+  padding: 14px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.review-item {
+  padding: 16px 18px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+}
+
+.review-item__email {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.review-item__rating {
+  margin: 0 0 6px;
+  font-family: var(--font-num);
+  font-weight: 600;
+}
+
+.review-item__content {
+  margin: 0 0 10px;
+  font-size: 14px;
+  white-space: pre-wrap;   /* 서버가 보존한 내부 개행을 화면에서도 보존한다 (27.7) */
+}
+
+.review-item__date {
+  display: block;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.review-item__edit,
+.review-item__delete {
+  padding: 5px 12px;
+  margin-right: 8px;
+  font-size: 12.5px;
+}
+
+.review-edit-form {
+  margin: 10px 0 0;
+  padding: 14px;
+  border: 1px solid var(--rule);
+  background: var(--tint-a);
+  max-width: 420px;
+}
+
+.review-edit-form .field:last-of-type { margin-bottom: 14px; }
