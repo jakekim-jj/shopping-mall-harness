@@ -2,14 +2,16 @@
   "name": "shopping-mall-harness",
   "version": "1.0.0",
   "private": true,
-  "description": "쇼핑몰 랜딩 페이지 - 상품 목록 API + 정적 프론트 서빙 (단일 서버, 단일 포트 3000)",
+  "description": "AI agent harness for a shopping-mall MVP — planner/backend/frontend/QA cycle with Playwright regression suite",
   "type": "commonjs",
   "main": "server.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node ./node_modules/@playwright/test/cli.js test",
+    "test:headed": "node ./node_modules/@playwright/test/cli.js test --headed --workers=1"
   },
   "dependencies": {
     "express": "^4.19.2"

@@ -1,6 +1,6 @@
 ## 하네스: 쇼핑몰 웹사이트 제작
 
-**목표:** 상품 목록/상세/장바구니/모의 결제로 구성된 쇼핑몰 웹사이트를, 기획/백엔드/프론트엔드/QA 4명의 에이전트 팀이 협업하여 제작한다.
+**목표:** 상품 목록/상세/장바구니/모의 결제에 더해, 회원가입·로그인과 상품 리뷰/평점까지 포함한 쇼핑몰 웹사이트를, 기획/백엔드/프론트엔드/QA 4명의 에이전트 팀이 협업하여 제작한다. (1~4차 MVP → 5차 인증 → 6차 인가·리뷰. 이후 사이클의 중심은 기능 확장보다 QA 하네스·회귀 자산 보강.)
 
 **트리거:** 쇼핑몰 관련 작업 요청 시 `shopping-mall-orchestrator` 스킬을 사용하라. 단순 질문은 직접 응답 가능.
 
@@ -16,3 +16,10 @@
 | 2026-08-09 | qa-agent의 자동화 프로세스를 "문서 작성 → 사용자 승인 → 자동화 코드 작성" 2단계로 고정. 오케스트레이터 Phase 4에 승인 체크포인트 명시 | agents/qa-agent.md, skills/shopping-mall-orchestrator/SKILL.md | 이번 사이클에 사용자가 "케이스 먼저 보고 승인한 뒤 자동화"를 요청 — 매번 수동으로 요청 안 해도 되게 하네시 규칙으로 고정 |
 | 2026-08-09 | 하네스 기본값(전원 opus)을 부분적으로 낮춤 — backend-agent/frontend-agent/qa-agent(자동화 단계)는 sonnet, product-planner/qa-agent(검증 단계)는 opus 유지 | agents/backend-agent.md, frontend-agent.md, qa-agent.md, skills/shopping-mall-orchestrator/SKILL.md | 사용자가 토큰 소비량 지적 — 판단 비중이 낮은 실행 작업(상세 명세를 그대로 구현/변환)은 sonnet으로도 충분하다고 판단, 판단 비중 높은 두 곳(범위 결정, 경계면 검증)만 opus 유지 |
 | 2026-08-10 | 4번째 사이클: 모의 결제(mock checkout) 추가 — 장바구니→결제→주문확인, 실제 PG 미연동, 결제수단으로 성공/실패 결정론적 시뮬레이션. Playwright 84개 전부 통과(기존 45 → 84) | _workspace/*, server.js, public/checkout.*, public/order.*, tests/test-cases.ko.md, tests/e2e/checkout.spec.js, order.spec.js, cart.spec.js | 원래 MVP 범위(상품/장바구니/모의결제)의 마지막 조각. 사용자가 "실PG 연동 안 되면 반쪽짜리 아니냐" 우려 제기 → 모의 결제로도 경계면(장바구니↔결제 총액 일치, 성공/실패 분기, 재고 미차감 등) 검증 가치는 있다고 합의 후 진행. 이번 세션에서 Agent Teams(TeamCreate) 비활성으로 오케스트레이터의 팀 모드 대신 서브 에이전트 순차 호출(product-planner→backend→frontend→qa) 폴백 경로 사용 |
+| 2026-10-07 | 5차 사이클: 회원가입/로그인/로그아웃 — 회원은 메모리+쿠키 세션, 장바구니·주문과 완전 분리(D27). Playwright 84 → 204 | _workspace/*, server.js, public/signup.*·login.*·auth-header.js, tests/e2e/auth-*.spec.js, tests/test-cases.ko.md | 기능 추가보다 실패·경계 케이스(잘못된 입력/상태, 로그인 실패 메시지 비구분, 가입≠자동로그인)를 확정하는 사이클. 1~4차 회귀를 건드리지 않으려고 인증을 독립 레이어로 둠 |
+| 2026-10-07 | 자동화 서술 규칙을 BDD/시나리오 스타일로 고정 — describe=방문자 시나리오, test=흐름 문장, PRD/매트릭스 번호는 [ ] 각주, 다단계는 test.step(Given/When/Then). 기존 1~4차 spec도 같은 톤으로 재작성 | skills/shopping-mall-qa/SKILL.md, tests/e2e/*.spec.js | 케이스 수가 늘며 PRD 조항 번호만으로는 읽고 디버깅하기 어려워짐. test-cases.ko.md(요구사항 추적)와 spec(실행·디버그)의 역할을 분리 |
+| 2026-10-07 | 사이클 목적 서술을 케이스 문서에 명시 — 섹션 머리말에 「이 사이클이 특별한 이유」를 두고, 성공보다 네거티브·설계 의도(장바구니↔회원 비연동 등)를 먼저 읽히게 함 | tests/test-cases.ko.md (5차 섹션) | "무엇을 만들었나"가 아니라 "이번 사이클에서 QA가 무엇을 확정하려 했나"를 후속 사이클·사람 독자가 같은 기준으로 읽게 하기 위함 |
+| 2026-10-07 | 실행 기반 재검증을 5차 산출 기준으로 명시 — 에이전트 자기보고가 아니라 실서버·실브라우저로 단언 통과 후 test-cases → 승인 → 자동화. 5차: 단언 296 / 제품 결함 0 | _workspace/04_qa_report.md, tests/test-cases.ko.md | 승인 2단계(8/09)를 통과 개수로 증명 가능한 습관으로 유지. "작성만 한 테스트"는 신뢰하지 않는다는 규칙을 5차에서도 지킴 |
+| 2026-10-11 | 6차 사이클: 상품 리뷰/평점 — 읽기 공개 / 쓰기·수정·삭제는 로그인 필수. 남의 리뷰=403 vs 없음=404(주문 조회 D23과 의도적 비대칭). Playwright 204 → 299 | _workspace/*, server.js, public/product.*, tests/e2e/review-*.spec.js, tests/test-cases.ko.md | 5차 auth를 UI 표시용이 아니라 첫 인가(authorization) 경계로 쓰는 사이클. "로그인했는지" → "그게 네 것인지"로 QA 질문 한 단계 상승 |
+| 2026-10-11 | 6차에 사이클 목적·BDD 규칙 재적용 + flaky 6건을 절대값(리뷰 수 0)이 아닌 증분(delta) 기대로 안정화 — 서버 재시작 없이 반복 실행 가능 | tests/test-cases.ko.md, tests/e2e/review-write.spec.js | 5차에 만든 서술/목적 규칙을 다음 사이클의 기본값으로 고정. 회귀 자산이 커질수록 "한 번만 통과"가 아니라 반복 실행 안정성이 QA 보강 포인트가 됨 |
+| 2026-10-13 | 상태 단언 헬퍼 `expectOnlyState`를 isVisible 스냅샷 → expect().toBeVisible/Hidden(대기)으로 통일. README에 회귀 기준 시간(299개 약 15–25초) 기록, npm test가 로컬 @playwright/test CLI를 쓰도록 고정 | tests/e2e/order·cart·landing·product-detail.spec.js, README.md, package.json | 병렬 부하에서 로딩→완료 레이스로 order/cart flaky. Playwright 대기를 헬퍼가 우회한 것이 원인. CI 전 로컬 기준 시간과 PATH(다른 playwright) 충돌도 같이 정리 |

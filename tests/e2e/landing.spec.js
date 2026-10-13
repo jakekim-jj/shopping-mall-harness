@@ -66,16 +66,19 @@ function formatPrice(n) {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '원';
 }
 
-/** 목록 화면의 4개 상태 컨테이너 중 정확히 하나만 보이는지 단언한다 (PRD 2.4). */
+/** 목록 화면의 4개 상태 컨테이너 중 정확히 하나만 보이는지 단언한다 (PRD 2.4).
+ *  isVisible() 스냅샷이 아니라 expect().toBeVisible/Hidden으로 기다려서
+ *  로딩→완료 레이스를 피한다 (checkout.spec.js와 동일). */
 async function expectOnlyState(page, expected) {
   const ids = ['loading-state', 'empty-state', 'error-state', 'product-list'];
-  const visible = [];
   for (const id of ids) {
-    if (await page.getByTestId(id).isVisible()) {
-      visible.push(id);
+    const locator = page.getByTestId(id);
+    if (id === expected) {
+      await expect(locator).toBeVisible();
+    } else {
+      await expect(locator).toBeHidden();
     }
   }
-  expect(visible).toEqual([expected]);
 }
 
 // ===========================================================================
