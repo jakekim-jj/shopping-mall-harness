@@ -85,9 +85,3 @@ CLAUDE.md           # 하네스 목표 · 변경 이력(사유 포함)
 
 쇼핑몰 기능 추가·수정·QA 재검증 요청 시 `shopping-mall-orchestrator` 스킬을 사용합니다.  
 단순 질문은 오케스트레이터 없이 응답해도 됩니다. 자세한 트리거·모델 티어(판단=opus, 실행=sonnet)는 `CLAUDE.md`와 `.claude/skills/shopping-mall-orchestrator/SKILL.md`를 참고하세요.
-
-## 현재 한계 (의도적)
-
-- 실제 PG·DB·배포 파이프라인 없음  
-- CI 미연결 — 지금은 로컬 `npm test`(299, 약 15–25초)로 회귀 확인  
-- 이후 QA 표면 보강 후보: **CI 연결**
