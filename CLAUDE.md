@@ -24,3 +24,4 @@
 | 2026-10-11 | 6차에 사이클 목적·BDD 규칙 재적용 + flaky 6건을 절대값(리뷰 수 0)이 아닌 증분(delta) 기대로 안정화 — 서버 재시작 없이 반복 실행 가능 | tests/test-cases.ko.md, tests/e2e/review-write.spec.js | 5차에 만든 서술/목적 규칙을 다음 사이클의 기본값으로 고정. 회귀 자산이 커질수록 "한 번만 통과"가 아니라 반복 실행 안정성이 QA 보강 포인트가 됨 |
 | 2026-10-13 | 상태 단언 헬퍼 `expectOnlyState`를 isVisible 스냅샷 → expect().toBeVisible/Hidden(대기)으로 통일. README에 회귀 기준 시간(299개 약 15–25초) 기록, npm test가 로컬 @playwright/test CLI를 쓰도록 고정 | tests/e2e/order·cart·landing·product-detail.spec.js, README.md, package.json | 병렬 부하에서 로딩→완료 레이스로 order/cart flaky. Playwright 대기를 헬퍼가 우회한 것이 원인. CI 전 로컬 기준 시간과 PATH(다른 playwright) 충돌도 같이 정리 |
 | 2026-10-13 | README에서 「현재 한계 (의도적)」 섹션 삭제 (PG/DB/CI 미연결·후속 후보 문구) | README.md | 레포 첫 화면은 하네스가 무엇인지·어떻게 돌리는지에 두고, 미완 숙제 목록처럼 보이는 한계 절은 빼기로 함 |
+| 2026-10-28 | k6 성능 실험 트랙 추가 — 스모크·부하(ramp)·Think Time 비교·시나리오·스파이크·실패 UX, HTML 리포트, 학습 메모 | tests/perf/*, package.json, README.md | E2E와 분리해 VU/RPS/p95·ramp vs spike를 localhost에서 이해하기 위함. 결과 JSON은 gitignore |

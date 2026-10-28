@@ -66,6 +66,17 @@ npm run test:headed      # 창 보며 실행 (파일당 컨텍스트 1개)
 **회귀 기준 시간 (2026-10-13, 로컬 headless Chromium):** 전체 299개 약 **15–25초**  
 (파일 단위 병렬, 기본 워커. CI 붙일 때 이 구간을 예산으로 쓴다.)
 
+### 성능 / 부하 (k6, E2E와 분리)
+
+```bash
+npm run test:perf:smoke
+npm run test:perf:think-compare
+npm run test:perf:spike-compare
+```
+
+가이드·학습 메모: [`tests/perf/README.md`](./tests/perf/README.md), [`tests/perf/LEARNING-NOTES.md`](./tests/perf/LEARNING-NOTES.md)  
+결과 파일(`tests/perf/results/`)은 gitignore. k6 설치 필요.
+
 ## 레포 구조
 
 ```
@@ -77,6 +88,7 @@ public/             # 정적 화면
 tests/
   test-cases.ko.md  # 사람이 읽는 누적 테스트 케이스
   e2e/*.spec.js     # Playwright (화면·경계면 단위)
+  perf/             # k6 성능·부하 실험 트랙 (README · LEARNING-NOTES)
 server.js           # Express API + 정적 서빙
 CLAUDE.md           # 하네스 목표 · 변경 이력(사유 포함)
 ```

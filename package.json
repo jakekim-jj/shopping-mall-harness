@@ -11,7 +11,22 @@
   "scripts": {
     "start": "node server.js",
     "test": "node ./node_modules/@playwright/test/cli.js test",
-    "test:headed": "node ./node_modules/@playwright/test/cli.js test --headed --workers=1"
+    "test:headed": "node ./node_modules/@playwright/test/cli.js test --headed --workers=1",
+    "test:perf:smoke": "k6 run tests/perf/smoke-products.js",
+    "test:perf:cart": "k6 run tests/perf/cart-checkout.js",
+    "test:perf:mixed": "k6 run tests/perf/mixed-read.js",
+    "test:perf:load": "k6 run tests/perf/load-ramp-read.js",
+    "test:perf:load:report": "node tests/perf/run-load-with-report.js",
+    "test:perf:load:compare": "node tests/perf/run-load-with-report.js compare",
+    "test:perf:load:compare-rich": "node tests/perf/run-load-with-report.js compare-rich",
+    "test:perf:fail": "k6 run tests/perf/load-fail-demo.js",
+    "test:perf:fail:report": "node tests/perf/run-fail-with-report.js",
+    "test:perf:think-compare": "node tests/perf/run-load-with-report.js think-compare",
+    "test:perf:browse-cart": "k6 run tests/perf/load-ramp-browse-cart.js",
+    "test:perf:scenario-compare": "node tests/perf/run-scenario-compare.js",
+    "test:perf:spike": "k6 run tests/perf/load-spike-read.js",
+    "test:perf:spike-compare": "node tests/perf/run-spike-compare.js",
+    "test:perf": "npm run test:perf:smoke && npm run test:perf:cart && npm run test:perf:mixed"
   },
   "dependencies": {
     "express": "^4.19.2"
