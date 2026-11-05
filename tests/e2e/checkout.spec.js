@@ -488,8 +488,15 @@ test.describe('시나리오: 결제 화면의 상태 전환과 검증 규칙을 
         await new Promise((resolve) => setTimeout(resolve, 1000));
         await route.continue();
       });
+      const cartResponse = page.waitForResponse(
+        (res) => res.url().endsWith('/api/cart') && res.request().method() === 'GET'
+      );
       await page.goto('/checkout.html', { waitUntil: 'commit' });
       await expectOnlyState(page, 'loading');
+      // 가로챈 응답이 실제로 끝날 때까지 기다린 뒤에 unroute한다 — 안 기다리면 다음 step의 goto가
+      // 지연 중인 요청을 끊고, 1초 뒤 route.continue()가 "Route is already handled!"를 던져
+      // 창을 공유하는 이 파일의 뒤 테스트까지 "page closed"로 무너진다 (auth-session.spec.js C17과 같은 처방).
+      await cartResponse;
       await page.unroute('**/api/cart');
     });
 

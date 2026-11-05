@@ -283,8 +283,12 @@ test.describe('시나리오: 주문 확인 화면의 상태 전환을 확인하�
         await new Promise((resolve) => setTimeout(resolve, 1000));
         await route.continue();
       });
+      const orderResponse = page.waitForResponse((res) => res.url().includes('/api/orders/'));
       await page.goto('/order.html?orderId=' + order.orderId, { waitUntil: 'commit' });
       await expectOnlyState(page, 'order-loading');
+      // 가로챈 응답이 끝난 뒤에 unroute한다 — 지연된 route.continue()가 다음 step의 goto 이후
+      // 뒤늦게 실행되며 "Route is already handled!"를 던지는 것을 막는다 (checkout 16.17과 같은 처방).
+      await orderResponse;
       await page.unroute('**/api/orders/*');
     });
 

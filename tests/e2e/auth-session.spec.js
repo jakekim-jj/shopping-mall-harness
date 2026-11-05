@@ -327,12 +327,12 @@ test.describe('시나리오: 헤더가 로그인 상태를 어떻게 반영하�
     await expect(page.getByTestId('auth-guest')).toBeHidden();
     await expect(page.getByTestId('auth-user')).toBeHidden();
     // 장바구니 화면 본문은 4개 상태 중 하나로 정상 렌더된다 (인증 실패 때문에 에러 화면이 되지 않는다)
+    // isVisible() 스냅샷을 순서대로 세면 로딩→완료 전환 순간에 0개/2개로 잡혀 병렬 부하에서 flaky하다
+    // (2026-10-13 expectOnlyState와 같은 원인). ":visible" 합집합을 toHaveCount(1)로 재시도 대기한다.
     const bodyStates = ['cart-loading', 'cart-list', 'cart-empty', 'cart-error'];
-    let bodyVisibleCount = 0;
-    for (const id of bodyStates) {
-      if (await page.getByTestId(id).isVisible()) bodyVisibleCount += 1;
-    }
-    expect(bodyVisibleCount).toBe(1);
+    await expect(
+      page.locator(bodyStates.map((id) => `[data-testid="${id}"]:visible`).join(', '))
+    ).toHaveCount(1);
 
     await page.goto('/checkout.html');
     await expect(page.getByTestId('auth-guest')).toBeHidden();
