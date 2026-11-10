@@ -1918,6 +1918,55 @@ console.log(isReviewRequestPath('/api/products/p1'));           // false
 
 ---
 
+## 7차 사이클 (2026-11-10) — 회원 주문 내역 / 주문 상세 소유권
+
+기존 17개 + 신규 1개 = 18개. 응답 shape 변경은 없다. `Order` 응답은 9개 필드 그대로이며 `ownerEmail`·`cartId`는 어디에도 나가지 않는다 (`toOrderResponse()` 한 곳에서 제거, 목록도 같은 함수).
+
+### GET /api/me/orders (신규, 로그인 필수)
+
+- 쿼리스트링·body 전부 무시. `cartId`를 읽지도 쓰지도 발급하지도 않는다 (`ensureCartId()` 미호출, `Set-Cookie: cartId` 없음).
+- 세션 판정은 `resolveSession()` — 무효/만료 쿠키면 `sessionId` 폐기 Set-Cookie 동반.
+
+**200**: `{ "orders": [ Order(9필드), ... ] }` — `ownerEmail === 세션 email`인 주문만, 최신 결제순(Map 삽입 역순). 주문이 없으면 `{ "orders": [] }` (200).
+
+| 상태 | 조건 | body |
+|---|---|---|
+| 200 | 유효 세션 | `{ orders: [...] }` (빈 배열 가능) |
+| 401 | 세션 쿠키 없음/위조/만료 | `{ error: { message: "로그인이 필요합니다." } }` |
+| 500 | 예외 | `{ error: { message: "주문 내역을 불러오지 못했습니다." } }` (공용 핸들러에 `/api/me/orders` 분기 추가, 기존 분기 문구 불변) |
+
+### POST /api/checkout (내부 동작만 변경)
+
+요청·응답 shape·상태코드 불변. 성공 시점에 `findSession(req)`로 유효 세션이 있으면 `order.ownerEmail = email`, 없으면 `null`. 읽기 전용이라 `sessionId` 쿠키를 쓰지 않으며 401/세션 발급도 없다. 귀속은 소급·변경되지 않는다.
+
+### GET /api/orders/:orderId (소유권 판정만 변경)
+
+`ensureCartId()`는 핸들러 진입 시 1회, 기존 그대로. 세션은 `findSession()`으로만 읽는다 (`resolveSession()` 금지: 가짜/만료 쿠키에 폐기 헤더가 회원 주문에서만 나가면 존재 누설).
+
+| 대상 주문 | 조건 | 결과 |
+|---|---|---|
+| 없음 | - | 404 `주문을 찾을 수 없습니다.` |
+| 회원 주문 (`ownerEmail != null`) | 유효 세션 email == ownerEmail (cartId 무관) | 200 `{ order }` |
+| 회원 주문 | 그 외 전부 (쿠키 없음/위조/만료/다른 계정, cartId가 같아도) | 404 (동일) |
+| 비회원 주문 (`ownerEmail == null`) | 요청 cartId == 주문 cartId (로그인 여부 무관) | 200 |
+| 비회원 주문 | 그 외 | 404 (동일) |
+
+세 종류의 404(없음 / 주인 아닌 회원 주문 / cartId 다른 비회원 주문)는 같은 요청 쿠키에서 status·body·헤더(Date 제외)가 동일하다. 401/403은 7차에 등장하지 않는다.
+
+### 프론트가 알아야 할 점
+
+- `/order.html` 코드 변경 불필요: 200이면 `order-confirmation`, 404면 `order-not-found`.
+- 목록 카드는 `/order.html?orderId=<orderId>`로 링크. 응답에 회원 여부 표시 필드는 없다.
+- `/orders.html`은 `GET /api/me/orders`가 401이면 안내만 표시(리다이렉트 없음). 이 호출은 cartId를 건드리지 않으므로 `GET /api/cart`·`GET /api/auth/me`와 병렬로 쏴도 M4 재발 없음.
+- `/order.html`에서 cartId 없이 유효 세션만 있는 브라우저가 회원 주문을 200으로 볼 수 있다 (병렬 `GET /api/cart`와 상세가 각각 cartId를 발급할 수 있으나 둘 다 빈 장바구니라 무해, PRD 7차 배경).
+- bug-history: M5는 `/api/me/orders` 분기를 추가해 반영, 주문 404에는 리뷰 403·401 문구를 재사용하지 않음. M4는 결제·상세가 세션을 읽기만 하고 sessionId 쿠키를 쓰지 않는 구조로 회피.
+
+### 7차 curl 확인
+
+비로그인 목록 401 / 로그인 후 결제→목록 노출 / 다른 jar에서 같은 계정 상세 200 / 같은 cartId+다른 계정 404이며 없는 주문 404와 동일 / 가짜 sessionId 쿠키에서도 동일(Set-Cookie 폐기 없음) / 비회원 주문은 cartId로 200이고 회원 목록에 안 나옴. Playwright 299개 전부 통과.
+
+---
+
 ## 변경 이력
 
 | 날짜 | 변경 내용 | 사유 |

@@ -366,7 +366,8 @@ function generateOrderId(now) {
 
 /** 저장된 Order에서 서버 내부 전용 cartId를 제거한 응답용 객체를 만든다 (PRD 8.6). */
 function toOrderResponse(order) {
-  const { cartId, ...publicOrder } = order;
+  // cartId, ownerEmail은 서버 내부 전용 — 응답 9개 필드에서 제거한다 (7차 D55). 목록도 이 함수를 그대로 쓴다.
+  const { cartId, ownerEmail, ...publicOrder } = order;
   return publicOrder;
 }
 
@@ -647,6 +648,9 @@ app.post('/api/checkout', (req, res, next) => {
       totalPrice: snapshot.totalPrice,
       createdAt: now.toISOString(),
       cartId, // 서버 내부 전용 — 응답에는 포함하지 않는다 (toOrderResponse가 제거)
+      // 7차 R3/D54: 결제 성공 시점에 유효 세션이 있으면 그 email, 없으면 null. 한 번 기록되면 불변.
+      // findSession()은 읽기 전용이다 — 결제 핸들러는 sessionId 쿠키를 절대 쓰지 않는다 (D63 / M4).
+      ownerEmail: findSession(req).session?.email ?? null,
     };
 
     orders.set(orderId, order);
@@ -676,12 +680,50 @@ app.get('/api/orders/:orderId', (req, res, next) => {
     const cartId = ensureCartId(req, res);
     const order = orders.get(orderId);
 
-    if (!order || order.cartId !== cartId) {
+    // 7차 R7/D57/D58: 소유 축은 주문마다 하나. 회원 주문=세션 email, 비회원 주문=cartId.
+    // findSession()만 쓴다 — resolveSession()은 가짜/만료 쿠키에 폐기 Set-Cookie를 싣어
+    // 회원 주문에서만 헤더가 달라져 존재가 샌다 (D63 d). 세 가지 404는 같은 상수·같은 경로로 나간다.
+    let allowed = false;
+    if (order) {
+      if (order.ownerEmail != null) {
+        allowed = findSession(req).session?.email === order.ownerEmail;
+      } else {
+        allowed = order.cartId === cartId;
+      }
+    }
+
+    if (!allowed) {
       sendError(res, 404, ORDER_NOT_FOUND_ERROR);
       return;
     }
 
     res.status(200).json({ order: toOrderResponse(order) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/me/orders — 로그인 회원의 주문 목록 (7차 PRD 36.1~36.9)
+//
+// 200: { "orders": [ Order 9필드 ... ] } 최신 결제순, 빈 목록도 200. 쿼리/body 무시.
+// 401: 로그인이 필요합니다. (resolveSession — 무효/만료 쿠키는 폐기 헤더 포함, 36.5)
+// ⚠️ ensureCartId()를 호출하지 않고 cartId를 읽지도 쓰지도 않는다 (36.7 / M4).
+// ---------------------------------------------------------------------------
+app.get('/api/me/orders', (req, res, next) => {
+  try {
+    const resolved = resolveSession(req, res);
+    if (!resolved) {
+      sendError(res, 401, LOGIN_REQUIRED_ERROR);
+      return;
+    }
+    const email = resolved.session.email;
+    const mine = [];
+    for (const order of orders.values()) {
+      if (order.ownerEmail === email) mine.push(toOrderResponse(order));
+    }
+    mine.reverse(); // Map 삽입 순서의 역순 = 최신 결제순 (36.3)
+    res.status(200).json({ orders: mine });
   } catch (err) {
     next(err);
   }
@@ -1438,6 +1480,8 @@ app.use((err, req, res, next) => {
       message = '결제 요청을 처리하지 못했습니다.';
     } else if (req.path.startsWith('/api/orders')) {
       message = '주문 정보를 불러오지 못했습니다.';
+    } else if (req.path.startsWith('/api/me/orders')) {
+      message = '주문 내역을 불러오지 못했습니다.';
     } else if (req.path.startsWith('/api/auth')) {
       message = '인증 요청을 처리하지 못했습니다.';
     }
