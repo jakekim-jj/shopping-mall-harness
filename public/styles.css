@@ -909,6 +909,7 @@ body {
 .auth-area {
   display: flex;
   align-items: center;
+  gap: 14px;
 }
 
 /* auth-guest/auth-user 둘 다 DOM에 항상 존재하고 hidden 토글만 된다 (PRD 20.5).
@@ -1114,3 +1115,39 @@ body {
 }
 
 .review-edit-form .field:last-of-type { margin-bottom: 14px; }
+
+/* ---------- 주문 내역 화면 (7차 PRD 35장) ---------- */
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 20px;
+}
+.history-list[hidden] { display: none; }
+
+.history-order {
+  border: 1px solid var(--rule);
+  background: var(--card);
+  padding: 18px var(--gutter);
+}
+
+.history-order__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.history-order__id { font-weight: 600; font-family: var(--font-num); }
+.history-order__status { color: var(--accent); }
+.history-order__time { color: var(--muted); }
+
+.history-order__link {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--accent);
+}

@@ -20,6 +20,8 @@
  *   비로그인 확정                  → auth-guest visible, auth-user hidden
  *   로그인 확정                    → auth-user visible, auth-guest hidden
  *   두 요소는 DOM에서 제거/재생성하지 않고 hidden 토글만 한다.
+ *   7차(D61 / 34장): header-orders-link(auth-user 밖 형제)도 showUnresolved/showGuest/showUser
+ *   안에서 auth-user와 같은 호출로 토글한다 (확정 전·비로그인=hidden, 로그인=visible). 추가 요청 없음.
  *
  * 6차 추가 — 구독 창구 (PRD D52 / 28.2):
  *   리뷰 영역(product.js)이 로그인 상태를 알아야 하지만, 화면당 GET /api/auth/me 호출 수는
@@ -41,7 +43,8 @@
       guest: document.querySelector('[data-testid="auth-guest"]'),
       user: document.querySelector('[data-testid="auth-user"]'),
       email: document.querySelector('[data-testid="auth-user-email"]'),
-      logoutBtn: document.querySelector('[data-testid="auth-logout-button"]')
+      logoutBtn: document.querySelector('[data-testid="auth-logout-button"]'),
+      ordersLink: document.querySelector('[data-testid="header-orders-link"]')
     };
   }
 
@@ -87,6 +90,7 @@
     var e = els();
     if (e.guest) e.guest.hidden = true;
     if (e.user) e.user.hidden = true;
+    if (e.ordersLink) e.ordersLink.hidden = true;
     setState('unresolved', null);
   }
 
@@ -94,6 +98,7 @@
     var e = els();
     if (e.guest) e.guest.hidden = false;
     if (e.user) e.user.hidden = true;
+    if (e.ordersLink) e.ordersLink.hidden = true;
     setState('guest', null);
   }
 
@@ -101,6 +106,7 @@
     var e = els();
     if (e.user) e.user.hidden = false;
     if (e.guest) e.guest.hidden = true;
+    if (e.ordersLink) e.ordersLink.hidden = false; // 7차 D61: auth-user와 같은 렌더 호출에서 함께 토글
     if (e.email) e.email.textContent = email; // 마스킹 없이 그대로 전체 표시 (PRD 20.4)
     setState('user', email);
   }

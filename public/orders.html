@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>하루상점 — 주문 내역</title>
+  <meta name="description" content="하루상점 회원 주문 내역 화면입니다.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div class="mark">
+        <a class="mark__home" href="/">
+          <span class="mark__latin">HARU STORE</span>
+        </a>
+        <span class="mark__ko">하루상점 · 매일 쓰는 것들</span>
+      </div>
+      <div class="masthead__aside">
+        <div class="auth-area" data-testid="auth-area">
+          <div class="auth-guest" data-testid="auth-guest" hidden>
+            <a class="auth-link" data-testid="auth-login-link" href="/login.html">로그인</a>
+            <a class="auth-link" data-testid="auth-signup-link" href="/signup.html">회원가입</a>
+          </div>
+          <div class="auth-user" data-testid="auth-user" hidden>
+            <span class="auth-user__email" data-testid="auth-user-email"></span>
+            <button class="auth-logout" type="button" data-testid="auth-logout-button">로그아웃</button>
+          </div>
+          <a class="auth-link auth-orders-link" data-testid="header-orders-link" href="/orders.html" hidden>주문 내역</a>
+        </div>
+        <a class="cart-link" data-testid="cart-link" href="/cart.html">
+          <span class="cart-link__label">장바구니</span>
+          <span class="cart-link__count" data-testid="cart-count" hidden>0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shelf">
+    <h1 class="shelf__title">주문 내역</h1>
+    <p class="backlink"><a href="/">← 판매 중인 상품</a></p>
+
+    <!-- 본문 5상태 (PRD 35.2): 항상 정확히 하나만 보인다. 전부 DOM 상주 + hidden 토글.
+         판정 근거는 GET /api/me/orders 응답 하나다 (D60). -->
+    <div class="cart-skeleton" data-testid="history-loading" id="history-loading" aria-live="polite" aria-busy="true">
+      <span class="sr-only">주문 내역을 불러오는 중입니다.</span>
+      <span class="skeleton__line skeleton__line--desc" aria-hidden="true"></span>
+      <span class="skeleton__line skeleton__line--desc" aria-hidden="true"></span>
+    </div>
+
+    <div class="notice" data-testid="history-login-required" id="history-login-required" hidden>
+      <p class="notice__title">로그인 후 주문 내역을 볼 수 있습니다.</p>
+      <p class="notice__action"><a data-testid="history-login-link" href="/login.html">로그인 하러 가기</a></p>
+    </div>
+
+    <ul class="history-list" data-testid="history-list" id="history-list" hidden></ul>
+
+    <div class="notice" data-testid="history-empty" id="history-empty" hidden>
+      <p class="notice__title">주문 내역이 없습니다.</p>
+      <p class="notice__action"><a href="/">상품 목록으로 돌아가기</a></p>
+    </div>
+
+    <div class="notice notice--error" data-testid="history-error" id="history-error" hidden role="alert">
+      <p class="notice__title">주문 내역을 불러오지 못했습니다.</p>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>하루상점 — 주문 내역 화면</p>
+  </footer>
+
+  <script src="/cart-badge.js"></script>
+  <script src="/auth-header.js"></script>
+  <script src="/orders.js"></script>
+</body>
+</html>
